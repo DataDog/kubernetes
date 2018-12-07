@@ -55,6 +55,12 @@ type KubeProxyIPVSConfiguration struct {
 	// excludeCIDRs is a list of CIDR's which the ipvs proxier should not touch
 	// when cleaning up ipvs services.
 	ExcludeCIDRs []string
+	// IPVS TCP Active timeout
+	TCPActiveTimeout metav1.Duration
+	// IPVS TCP InActive timeout
+	TCPInActiveTimeout metav1.Duration
+	// IPVS UDP timeout
+	UDPTimeout metav1.Duration
 }
 
 // KubeProxyConntrackConfiguration contains conntrack settings for

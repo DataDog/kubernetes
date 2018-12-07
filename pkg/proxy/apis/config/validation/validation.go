@@ -118,6 +118,18 @@ func validateKubeProxyIPVSConfiguration(config kubeproxyconfig.KubeProxyIPVSConf
 		allErrs = append(allErrs, field.Invalid(fldPath.Child("SyncPeriod"), config.MinSyncPeriod, fmt.Sprintf("must be greater than or equal to %s", fldPath.Child("MinSyncPeriod").String())))
 	}
 
+	if config.TCPActiveTimeout.Duration < 0 {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("TCPActiveTimeout"), config.TCPActiveTimeout, "must be greater than or equal to 0"))
+	}
+
+	if config.TCPInActiveTimeout.Duration < 0 {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("TCPInActiveTimeout"), config.TCPInActiveTimeout, "must be greater than or equal to 0"))
+	}
+
+	if config.UDPTimeout.Duration < 0 {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("UDPTimeout"), config.UDPTimeout, "must be greater than or equal to 0"))
+	}
+
 	allErrs = append(allErrs, validateIPVSSchedulerMethod(kubeproxyconfig.IPVSSchedulerMethod(config.Scheduler), fldPath.Child("Scheduler"))...)
 	allErrs = append(allErrs, validateIPVSExcludeCIDRs(config.ExcludeCIDRs, fldPath.Child("ExcludeCidrs"))...)
 

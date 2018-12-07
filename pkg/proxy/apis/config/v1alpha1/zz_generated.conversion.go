@@ -210,6 +210,9 @@ func autoConvert_v1alpha1_KubeProxyIPVSConfiguration_To_config_KubeProxyIPVSConf
 	out.MinSyncPeriod = in.MinSyncPeriod
 	out.Scheduler = in.Scheduler
 	out.ExcludeCIDRs = *(*[]string)(unsafe.Pointer(&in.ExcludeCIDRs))
+	out.TCPActiveTimeout = in.TCPActiveTimeout
+	out.TCPInActiveTimeout = in.TCPInActiveTimeout
+	out.UDPTimeout = in.UDPTimeout
 	return nil
 }
 
@@ -223,6 +226,9 @@ func autoConvert_config_KubeProxyIPVSConfiguration_To_v1alpha1_KubeProxyIPVSConf
 	out.MinSyncPeriod = in.MinSyncPeriod
 	out.Scheduler = in.Scheduler
 	out.ExcludeCIDRs = *(*[]string)(unsafe.Pointer(&in.ExcludeCIDRs))
+	out.TCPActiveTimeout = in.TCPActiveTimeout
+	out.TCPInActiveTimeout = in.TCPInActiveTimeout
+	out.UDPTimeout = in.UDPTimeout
 	return nil
 }
 
