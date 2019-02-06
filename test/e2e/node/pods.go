@@ -32,13 +32,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubelet "k8s.io/kubernetes/test/e2e/framework/kubelet"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -221,124 +219,86 @@ var _ = SIGDescribe("Pods Extended", func() {
 		})
 	})
 
-	ginkgo.Describe("Pod Container lifecycle", func() {
-		var podClient *framework.PodClient
-		ginkgo.BeforeEach(func() {
-			podClient = f.PodClient()
-		})
+	/*
+		// For now the a2a9964a66ef481d10db3ffc15d4b26a234d0bdd fix isn't compatible with
+		// the sidecar patchset we keep in this fork. Comment out related tests.
+		ginkgo.Describe("Pod Container lifecycle", func() {
+			var podClient *framework.PodClient
+			ginkgo.BeforeEach(func() {
+				podClient = f.PodClient()
+			})
 
-		ginkgo.It("should not create extra sandbox if all containers are done", func() {
-			ginkgo.By("creating the pod that should always exit 0")
+			ginkgo.It("should not create extra sandbox if all containers are done", func() {
+				ginkgo.By("creating the pod that should always exit 0")
 
-			name := "pod-always-succeed" + string(uuid.NewUUID())
-			image := imageutils.GetE2EImage(imageutils.BusyBox)
-			pod := &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-				},
-				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyOnFailure,
-					InitContainers: []v1.Container{
-						{
-							Name:  "foo",
-							Image: image,
-							Command: []string{
-								"/bin/true",
-							},
-						},
+				name := "pod-always-succeed" + string(uuid.NewUUID())
+				image := imageutils.GetE2EImage(imageutils.BusyBox)
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name,
 					},
-					Containers: []v1.Container{
-						{
-							Name:  "bar",
-							Image: image,
-							Command: []string{
-								"/bin/true",
-							},
-						},
-					},
-				},
-			}
-
-			ginkgo.By("submitting the pod to kubernetes")
-			createdPod := podClient.Create(pod)
-			defer func() {
-				ginkgo.By("deleting the pod")
-				podClient.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
-			}()
-
-			framework.ExpectNoError(e2epod.WaitForPodSuccessInNamespace(f.ClientSet, pod.Name, f.Namespace.Name))
-
-			var eventList *v1.EventList
-			var err error
-			ginkgo.By("Getting events about the pod")
-			framework.ExpectNoError(wait.Poll(time.Second*2, time.Second*60, func() (bool, error) {
-				selector := fields.Set{
-					"involvedObject.kind":      "Pod",
-					"involvedObject.uid":       string(createdPod.UID),
-					"involvedObject.namespace": f.Namespace.Name,
-					"source":                   "kubelet",
-				}.AsSelector().String()
-				options := metav1.ListOptions{FieldSelector: selector}
-				eventList, err = f.ClientSet.CoreV1().Events(f.Namespace.Name).List(context.TODO(), options)
-				if err != nil {
-					return false, err
-				}
-				if len(eventList.Items) > 0 {
-					return true, nil
-				}
-				return false, nil
-			}))
-
-			ginkgo.By("Checking events about the pod")
-			for _, event := range eventList.Items {
-				if event.Reason == events.SandboxChanged {
-					framework.Fail("Unexpected SandboxChanged event")
-				}
-			}
-		})
-
-		ginkgo.It("evicted pods should be terminal", func() {
-			ginkgo.By("creating the pod that should be evicted")
-
-			name := "pod-should-be-evicted" + string(uuid.NewUUID())
-			image := imageutils.GetE2EImage(imageutils.BusyBox)
-			pod := &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-				},
-				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyOnFailure,
-					Containers: []v1.Container{
-						{
-							Name:  "bar",
-							Image: image,
-							Command: []string{
-								"/bin/sh", "-c", "sleep 10; fallocate -l 10M file; sleep 10000",
-							},
-							Resources: v1.ResourceRequirements{
-								Limits: v1.ResourceList{
-									"ephemeral-storage": resource.MustParse("5Mi"),
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyOnFailure,
+						InitContainers: []v1.Container{
+							{
+								Name:  "foo",
+								Image: image,
+								Command: []string{
+									"/bin/true",
 								},
-							}},
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  "bar",
+								Image: image,
+								Command: []string{
+									"/bin/true",
+								},
+							},
+						},
 					},
-				},
-			}
+				}
 
-			ginkgo.By("submitting the pod to kubernetes")
-			podClient.Create(pod)
-			defer func() {
-				ginkgo.By("deleting the pod")
-				podClient.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
-			}()
+				ginkgo.By("submitting the pod to kubernetes")
+				createdPod := podClient.Create(pod)
+				defer func() {
+					ginkgo.By("deleting the pod")
+					podClient.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
+				}()
 
-			err := e2epod.WaitForPodTerminatedInNamespace(f.ClientSet, pod.Name, "Evicted", f.Namespace.Name)
-			if err != nil {
-				framework.Failf("error waiting for pod to be evicted: %v", err)
-			}
+				framework.ExpectNoError(e2epod.WaitForPodSuccessInNamespace(f.ClientSet, pod.Name, f.Namespace.Name))
 
+				var eventList *v1.EventList
+				var err error
+				ginkgo.By("Getting events about the pod")
+				framework.ExpectNoError(wait.Poll(time.Second*2, time.Second*60, func() (bool, error) {
+					selector := fields.Set{
+						"involvedObject.kind":      "Pod",
+						"involvedObject.uid":       string(createdPod.UID),
+						"involvedObject.namespace": f.Namespace.Name,
+						"source":                   "kubelet",
+					}.AsSelector().String()
+					options := metav1.ListOptions{FieldSelector: selector}
+					eventList, err = f.ClientSet.CoreV1().Events(f.Namespace.Name).List(context.TODO(), options)
+					if err != nil {
+						return false, err
+					}
+					if len(eventList.Items) > 0 {
+						return true, nil
+					}
+					return false, nil
+				}))
+
+				ginkgo.By("Checking events about the pod")
+				for _, event := range eventList.Items {
+					if event.Reason == events.SandboxChanged {
+						framework.Fail("Unexpected SandboxChanged event")
+					}
+				}
+			})
 		})
-	})
-
+	*/
 })
 
 func createAndTestPodRepeatedly(workers, iterations int, scenario podScenario, podClient v1core.PodInterface) {
