@@ -221,6 +221,10 @@ func (s *SecureServingOptions) ApplyTo(config **server.SecureServingInfo) error 
 	}
 	c := *config
 
+	c.CertSource = &server.CertInfo{
+		CertFile: &s.ServerCert.CertKey.CertFile,
+		KeyFile:  &s.ServerCert.CertKey.KeyFile,
+	}
 	serverCertFile, serverKeyFile := s.ServerCert.CertKey.CertFile, s.ServerCert.CertKey.KeyFile
 	// load main cert
 	if len(serverCertFile) != 0 || len(serverKeyFile) != 0 {
@@ -252,14 +256,21 @@ func (s *SecureServingOptions) ApplyTo(config **server.SecureServingInfo) error 
 	for _, nck := range s.SNICertKeys {
 		tlsCert, err := tls.LoadX509KeyPair(nck.CertFile, nck.KeyFile)
 		namedTLSCerts = append(namedTLSCerts, server.NamedTLSCert{
-			TLSCert: tlsCert,
-			Names:   nck.Names,
+			TLSCert:  tlsCert,
+			Names:    nck.Names,
+			CertFile: &nck.CertFile,
+			KeyFile:  &nck.KeyFile,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to load SNI cert and key: %v", err)
 		}
 	}
 	c.SNICerts, err = server.GetNamedCertificateMap(namedTLSCerts)
+	if err != nil {
+		return err
+	}
+
+	c.SNICertsSources, err = server.GetNamedCertificateMapSources(namedTLSCerts)
 	if err != nil {
 		return err
 	}

@@ -208,6 +208,20 @@ type RecommendedConfig struct {
 	ClientConfig *restclient.Config
 }
 
+type CertInfo struct {
+	// File where the certificate is read from
+	CertFile *string
+
+	// File where the privatekey is read from
+	KeyFile *string
+	//
+	// // Hash of the loaded Cert
+	// LoadedSourceHash *string
+	//
+	// // Hash of the filesystem Cert
+	// FSSourceHash *string
+}
+
 type SecureServingInfo struct {
 	// Listener is the secure server network listener.
 	Listener net.Listener
@@ -216,8 +230,14 @@ type SecureServingInfo struct {
 	// allowed to be in SNICerts.
 	Cert *tls.Certificate
 
+	// CertSource is the source file and information for the Cert certificate
+	CertSource *CertInfo
+
 	// SNICerts are the TLS certificates by name used for SNI.
 	SNICerts map[string]*tls.Certificate
+
+	// SNICertsSource are the source file for the certificate use by SNICerts
+	SNICertsSources map[string]*CertInfo
 
 	// ClientCA is the certificate bundle for all the signers that you'll recognize for incoming client certificates
 	ClientCA *x509.CertPool
