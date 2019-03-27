@@ -17,6 +17,7 @@ limitations under the License.
 package dockershim
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -25,7 +26,6 @@ import (
 	"github.com/blang/semver"
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
 
 	"k8s.io/api/core/v1"
 	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
@@ -83,7 +83,7 @@ const (
 type CRIService interface {
 	runtimeapi.RuntimeServiceServer
 	runtimeapi.ImageServiceServer
-	Start() error
+	Start(<-chan struct{}) error
 }
 
 // DockerService is an interface that embeds the new RuntimeService and
@@ -191,7 +191,8 @@ func NewDockerClientFromConfig(config *ClientConfig) libdocker.Interface {
 
 // NOTE: Anything passed to DockerService should be eventually handled in another way when we switch to running the shim as a different process.
 func NewDockerService(config *ClientConfig, podSandboxImage string, streamingConfig *streaming.Config,
-	pluginSettings *NetworkPluginSettings, cgroupsName string, kubeCgroupDriver string, dockershimRootDir string, disableSharedPID bool) (DockerService, error) {
+	pluginSettings *NetworkPluginSettings, cgroupsName string, kubeCgroupDriver string, dockershimRootDir string,
+	disableSharedPID, startLocalStreamingServer bool) (DockerService, error) {
 
 	client := NewDockerClientFromConfig(config)
 
@@ -212,6 +213,7 @@ func NewDockerService(config *ClientConfig, podSandboxImage string, streamingCon
 		containerManager:  cm.NewContainerManager(cgroupsName, client),
 		checkpointHandler: checkpointHandler,
 		disableSharedPID:  disableSharedPID,
+        startLocalStreamingServer: startLocalStreamingServer,
 		networkReady:      make(map[string]bool),
 	}
 
@@ -300,6 +302,9 @@ type dockerService struct {
 	// See proposals/pod-pid-namespace.md for details.
 	// TODO: Remove once the escape hatch is no longer used (https://issues.k8s.io/41938)
 	disableSharedPID bool
+	// startLocalStreamingServer indicates whether dockershim should start a
+	// streaming server on localhost.
+	startLocalStreamingServer bool
 }
 
 // TODO: handle context.
@@ -383,8 +388,21 @@ func (ds *dockerService) GetPodPortMappings(podSandboxID string) ([]*hostport.Po
 }
 
 // Start initializes and starts components in dockerService.
-func (ds *dockerService) Start() error {
-	// Initialize the legacy cleanup flag.
+func (ds *dockerService) Start(stopCh <-chan struct{}) error {
+    // Initialize the legacy cleanup flag.
+	if ds.startLocalStreamingServer {
+		go func() {
+            <-stopCh
+            if err := ds.streamingServer.Stop(); err != nil {
+				glog.Errorf("Failed to stop streaming server: %v", err)
+			}
+		}()
+		go func() {
+			if err := ds.streamingServer.Start(true); err != nil && err != http.ErrServerClosed {
+				glog.Fatalf("Failed to start streaming server: %v", err)
+			}
+		}()
+	}
 	return ds.containerManager.Start()
 }
 
