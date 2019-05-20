@@ -50,14 +50,17 @@ import (
 
 	"path"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
+	informercorev1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/api/v1/service"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"k8s.io/kubernetes/pkg/controller"
@@ -495,8 +498,13 @@ type Cloud struct {
 
 	instanceCache instanceCache
 
-	clientBuilder    controller.ControllerClientBuilder
-	kubeClient       clientset.Interface
+	clientBuilder controller.ControllerClientBuilder
+	kubeClient    clientset.Interface
+
+	nodeInformer informercorev1.NodeInformer
+	// Extract the function out to make it easier to test
+	nodeInformerHasSynced cache.InformerSynced
+
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 
@@ -635,6 +643,14 @@ func (p *awsSDKProvider) getCrossRequestRetryDelay(regionName string) *CrossRequ
 		p.regionDelayers[regionName] = delayer
 	}
 	return delayer
+}
+
+// SetInformers implements InformerUser interface by setting up informer-fed caches for aws lib to
+// leverage Kubernetes API for caching
+func (c *Cloud) SetInformers(informerFactory informers.SharedInformerFactory) {
+	glog.Infof("Setting up informers for Cloud")
+	c.nodeInformer = informerFactory.Core().V1().Nodes()
+	c.nodeInformerHasSynced = c.nodeInformer.Informer().HasSynced
 }
 
 func (p *awsSDKProvider) Compute(regionName string) (EC2, error) {
@@ -1565,7 +1581,7 @@ func (i *awsInstance) getInstanceType() *awsInstanceType {
 
 // Gets the full information about this instance from the EC2 API
 func (i *awsInstance) describeInstance() (*ec2.Instance, error) {
-	return describeInstance(i.ec2, awsInstanceID(i.awsID))
+	return describeInstance(i.ec2, InstanceID(i.awsID))
 }
 
 // Gets the mountDevice already assigned to the volume, or assigns an unused mountDevice.
@@ -3741,7 +3757,7 @@ func (c *Cloud) getTaggedSecurityGroups() (map[string]*ec2.SecurityGroup, error)
 
 // Open security group ingress rules on the instances so that the load balancer can talk to them
 // Will also remove any security groups ingress rules for the load balancer that are _not_ needed for allInstances
-func (c *Cloud) updateInstanceSecurityGroupsForLoadBalancer(lb *elb.LoadBalancerDescription, instances map[awsInstanceID]*ec2.Instance) error {
+func (c *Cloud) updateInstanceSecurityGroupsForLoadBalancer(lb *elb.LoadBalancerDescription, instances map[InstanceID]*ec2.Instance) error {
 	if c.cfg.Global.DisableSecurityGroupIngress {
 		return nil
 	}
@@ -4308,7 +4324,18 @@ func (c *Cloud) findInstanceByNodeName(nodeName types.NodeName) (*ec2.Instance, 
 // Returns the instance with the specified node name
 // Like findInstanceByNodeName, but returns error if node not found
 func (c *Cloud) getInstanceByNodeName(nodeName types.NodeName) (*ec2.Instance, error) {
-	instance, err := c.findInstanceByNodeName(nodeName)
+	var instance *ec2.Instance
+
+	// we leverage node cache to try to retrieve node's provider id first, as
+	// get instance by provider id is way more efficient than by filters in
+	// aws context
+	awsID, err := c.nodeNameToProviderID(nodeName)
+	if err != nil {
+		glog.V(3).Infof("Unable to convert node name %q to aws instanceID, fall back to findInstanceByNodeName: %v", nodeName, err)
+		instance, err = c.findInstanceByNodeName(nodeName)
+	} else {
+		instance, err = c.getInstanceByID(string(awsID))
+	}
 	if err == nil && instance == nil {
 		return nil, cloudprovider.InstanceNotFound
 	}
@@ -4326,6 +4353,26 @@ func (c *Cloud) getFullInstance(nodeName types.NodeName) (*awsInstance, *ec2.Ins
 	}
 	awsInstance := newAWSInstance(c.ec2, instance)
 	return awsInstance, instance, err
+}
+
+func (c *Cloud) nodeNameToProviderID(nodeName types.NodeName) (InstanceID, error) {
+	if len(nodeName) == 0 {
+		return "", fmt.Errorf("no nodeName provided")
+	}
+
+	if c.nodeInformerHasSynced == nil || !c.nodeInformerHasSynced() {
+		return "", fmt.Errorf("node informer has not synced yet")
+	}
+
+	node, err := c.nodeInformer.Lister().Get(string(nodeName))
+	if err != nil {
+		return "", err
+	}
+	if len(node.Spec.ProviderID) == 0 {
+		return "", fmt.Errorf("node has no providerID")
+	}
+
+	return kubernetesInstanceID(node.Spec.ProviderID).mapToAWSInstanceID()
 }
 
 func setNodeDisk(
