@@ -479,7 +479,7 @@ func containerSucceeded(c *v1.Container, podStatus *kubecontainer.PodStatus) boo
 
 func isSidecar(pod *v1.Pod, containerName string) bool {
 	if pod == nil {
-		glog.V(5).Infof("isSidecar: pod is nil, so returning false")
+		klog.V(5).Infof("isSidecar: pod is nil, so returning false")
 		return false
 	}
 	return pod.Annotations[fmt.Sprintf("sidecars.lyft.net/container-lifecycle-%s", containerName)] == "Sidecar"
@@ -506,21 +506,9 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		}
 	}
 
-	// Determine if there are any non sidecar containers that are running or need restarting
-	// if there are none, we can kill the remaining sidecars
-	sidecarsOnly := true
-	for _, container := range pod.Spec.Containers {
-		containerStatus := podStatus.FindContainerStatusByName(container.Name)
-		if !isSidecar(pod, container.Name) {
-			if kubecontainer.ShouldContainerBeRestarted(&container, pod, podStatus) || (containerStatus != nil && containerStatus.State == kubecontainer.ContainerStateRunning) {
-				sidecarsOnly = false
-			}
-		}
-	}
-
 	// determine sidecar status
 	sidecarStatus := status.GetSidecarsStatus(pod)
-	glog.Infof("Pod: %s, sidecars: %s, status: Present=%v,Ready=%v,ContainerWaiting=%v", format.Pod(pod), sidecarNames, sidecarStatus.SidecarsPresent, sidecarStatus.SidecarsReady, sidecarStatus.ContainersWaiting)
+	klog.Infof("Pod: %s, sidecars: %s, status: Present=%v,Ready=%v,ContainersWaiting=%v", format.Pod(pod), sidecarNames, sidecarStatus.SidecarsPresent, sidecarStatus.SidecarsReady, sidecarStatus.ContainersWaiting)
 
 	// If we need to (re-)create the pod sandbox, everything will need to be
 	// killed and recreated, and init containers should be purged.
@@ -613,7 +601,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		// - the non-sidecars have run before (i.e. they are not in a Waiting state) OR
 		// - the sidecars are ready (we're starting them for the first time)
 		if !isSidecar(pod, container.Name) && sidecarStatus.SidecarsPresent && sidecarStatus.ContainersWaiting && !sidecarStatus.SidecarsReady {
-			glog.Infof("Pod: %s, Container: %s, sidecar=%v skipped: Present=%v,Ready=%v,ContainerWaiting=%v", format.Pod(pod), container.Name, isSidecar(pod, container.Name), sidecarStatus.SidecarsPresent, sidecarStatus.SidecarsReady, sidecarStatus.ContainersWaiting)
+			klog.Infof("Pod: %s, Container: %s, sidecar=%v skipped: Present=%v,Ready=%v,ContainerWaiting=%v", format.Pod(pod), container.Name, isSidecar(pod, container.Name), sidecarStatus.SidecarsPresent, sidecarStatus.SidecarsReady, sidecarStatus.ContainersWaiting)
 			continue
 		}
 
@@ -632,10 +620,6 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		// If container does not exist, or is not running, check whether we
 		// need to restart it.
 		if containerStatus == nil || containerStatus.State != kubecontainer.ContainerStateRunning {
-			if sidecarsOnly && isSidecar(pod, container.Name) {
-				glog.Infof("Pod: %s: %s: is sidecar, sidecars only, so not restarting", format.Pod(pod), container.Name)
-				continue
-			}
 			if kubecontainer.ShouldContainerBeRestarted(&container, pod, podStatus) {
 				message := fmt.Sprintf("%s: Container %+v is dead, but RestartPolicy says that we should restart it.", pod.Name, container)
 				klog.V(3).Infof(message)
@@ -662,17 +646,6 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 			// Restart regardless of the restart policy because the container
 			// spec changed.
 			restart = true
-		} else if sidecarsOnly && isSidecar(pod, container.Name) {
-			// in this case, the container is a sidecar, but no
-			// non-sidecars are ever going to run again. we don't need
-			// the sidecars, so we kill it as well
-			reason = "Non-sidecars have completed. Container will be killed."
-			// we are not planning to restart this container.
-			restart = false
-			// keepCount set to avoid killing pod right away - we should only
-			// kill pod once all containers have exited and we get back into this
-			// loop.
-			keepCount += 1
 		} else if liveness, found := m.livenessManager.Get(containerStatus.ID); found && liveness == proberesults.Failure {
 			// If the container failed the liveness probe, we should kill it.
 			message = fmt.Sprintf("Container %s failed liveness probe", container.Name)
@@ -702,7 +675,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 	}
 
 	if keepCount == 0 && len(changes.ContainersToStart) == 0 {
-		glog.Infof("Pod: %s: KillPod=true", format.Pod(pod))
+		klog.Infof("Pod: %s: KillPod=true", format.Pod(pod))
 		changes.KillPod = true
 	}
 
@@ -951,10 +924,10 @@ func (m *kubeGenericRuntimeManager) KillPod(pod *v1.Pod, runningPod kubecontaine
 	// grace period and also the sidecar status.
 	if pod == nil {
 		for _, container := range runningPod.Containers {
-			glog.Infof("Pod: %s, KillPod: pod nil, trying to restore from container %s", runningPod.Name, container.ID)
+			klog.Infof("Pod: %s, KillPod: pod nil, trying to restore from container %s", runningPod.Name, container.ID)
 			podSpec, _, err := m.restoreSpecsFromContainerLabels(container.ID)
 			if err != nil {
-				glog.Errorf("Pod: %s, KillPod: couldn't restore: %s", runningPod.Name, container.ID)
+				klog.Errorf("Pod: %s, KillPod: couldn't restore: %s", runningPod.Name, container.ID)
 				continue
 			}
 			pod = podSpec
