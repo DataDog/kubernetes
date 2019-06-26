@@ -219,7 +219,7 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 		if handlerErr != nil {
 			m.recordContainerEvent(pod, container, kubeContainerID.ID, v1.EventTypeWarning, events.FailedPostStartHook, msg)
 			if err := m.killContainer(pod, kubeContainerID, container.Name, "FailedPostStartHook", 0); err != nil {
-				glog.Errorf("Failed to kill container %q(id=%q) in pod %q: %v, %v",
+				klog.Errorf("Failed to kill container %q(id=%q) in pod %q: %v, %v",
 					container.Name, kubeContainerID.String(), format.Pod(pod), ErrPostStartHook, err)
 			}
 			return msg, fmt.Errorf("%s: %v", ErrPostStartHook, handlerErr)
@@ -669,7 +669,7 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(pod *v1.Pod, ru
 	containerResults := make(chan *kubecontainer.SyncResult, len(runningPod.Containers))
 	// non-sidecars first
 	start := time.Now()
-	glog.Infof("Pod: %s, killContainersWithSyncResult: killing %d non-sidecars, %s termination period", runningPod.Name, len(nonSidecars), gracePeriodDuration)
+	klog.Infof("Pod: %s, killContainersWithSyncResult: killing %d non-sidecars, %s termination period", runningPod.Name, len(nonSidecars), gracePeriodDuration)
 	nonSidecarsWg := sync.WaitGroup{}
 	nonSidecarsWg.Add(len(nonSidecars))
 	for _, container := range nonSidecars {
@@ -691,7 +691,7 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(pod *v1.Pod, ru
 	}
 
 	// then sidecars
-	glog.Infof("Pod: %s, killContainersWithSyncResult: killing %d sidecars, %s left", runningPod.Name, len(sidecars), gracePeriodDuration)
+	klog.Infof("Pod: %s, killContainersWithSyncResult: killing %d sidecars, %s left", runningPod.Name, len(sidecars), gracePeriodDuration)
 	wg := sync.WaitGroup{}
 	wg.Add(len(sidecars))
 	for _, container := range sidecars {
