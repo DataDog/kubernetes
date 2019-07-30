@@ -34,7 +34,7 @@ import (
 	"github.com/armon/circbuf"
 	"github.com/golang/glog"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -530,8 +530,15 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 	var containerSpec *v1.Container
 	if pod != nil {
 		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
-			return fmt.Errorf("failed to get containerSpec %q(id=%q) in pod %q when killing container for reason %q",
-				containerName, containerID.String(), format.Pod(pod), reason)
+			// after a kubelet restart, it's not 100% certain that the
+			// pod we're given has the container we need in the spec
+			// -- we try to recover that here.
+			restoredPod, restoredContainer, err := m.restoreSpecsFromContainerLabels(containerID)
+			if err != nil {
+				return fmt.Errorf("failed to get containerSpec %q(id=%q) in pod %q when killing container for reason %q. error: %v",
+					containerName, containerID.String(), format.Pod(pod), reason, err)
+			}
+			pod, containerSpec = restoredPod, restoredContainer
 		}
 	} else {
 		// Restore necessary information if one of the specs is nil.
