@@ -23,7 +23,7 @@ import (
 	"reflect"
 	"testing"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -282,8 +282,7 @@ func TestProbe(t *testing.T) {
 	for i, test := range tests {
 		for _, probeType := range [...]probeType{liveness, readiness} {
 			prober := &prober{
-				refManager: kubecontainer.NewRefManager(),
-				recorder:   &record.FakeRecorder{},
+				recorder: &record.FakeRecorder{},
 			}
 			testID := fmt.Sprintf("%d-%s", i, probeType)
 			testContainer := v1.Container{Env: test.env}

@@ -76,10 +76,9 @@ type podStateProvider interface {
 }
 
 type kubeGenericRuntimeManager struct {
-	runtimeName         string
-	recorder            record.EventRecorder
-	osInterface         kubecontainer.OSInterface
-	containerRefManager *kubecontainer.RefManager
+	runtimeName string
+	recorder    record.EventRecorder
+	osInterface kubecontainer.OSInterface
 
 	// machineInfo contains the machine information.
 	machineInfo *cadvisorapi.MachineInfo
@@ -149,7 +148,6 @@ func NewKubeGenericRuntimeManager(
 	recorder record.EventRecorder,
 	livenessManager proberesults.Manager,
 	seccompProfileRoot string,
-	containerRefManager *kubecontainer.RefManager,
 	machineInfo *cadvisorapi.MachineInfo,
 	podStateProvider podStateProvider,
 	osInterface kubecontainer.OSInterface,
@@ -173,7 +171,6 @@ func NewKubeGenericRuntimeManager(
 		cpuCFSQuotaPeriod:   cpuCFSQuotaPeriod,
 		seccompProfileRoot:  seccompProfileRoot,
 		livenessManager:     livenessManager,
-		containerRefManager: containerRefManager,
 		machineInfo:         machineInfo,
 		osInterface:         osInterface,
 		runtimeHelper:       runtimeHelper,

@@ -20,7 +20,7 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -96,10 +96,9 @@ func NewManager(
 	statusManager status.Manager,
 	livenessManager results.Manager,
 	runner kubecontainer.ContainerCommandRunner,
-	refManager *kubecontainer.RefManager,
 	recorder record.EventRecorder) Manager {
 
-	prober := newProber(runner, refManager, recorder)
+	prober := newProber(runner, recorder)
 	readinessManager := results.NewManager()
 	return &manager{
 		statusManager:    statusManager,
