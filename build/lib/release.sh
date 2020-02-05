@@ -122,11 +122,17 @@ function kube::release::package_src_tarball() {
 # Package up all of the cross compiled clients. Over time this should grow into
 # a full SDK
 function kube::release::package_client_tarballs() {
-   # Find all of the built client binaries
-  local platform platforms
-  platforms=($(cd "${LOCAL_OUTPUT_BINPATH}" ; echo */*))
-  for platform in "${platforms[@]}"; do
-    local platform_tag=${platform/\//-} # Replace a "/" for a "-"
+  # Find all of the built client binaries
+  local long_platforms=("${LOCAL_OUTPUT_BINPATH}"/*/*)
+  if [[ -n ${KUBE_BUILD_PLATFORMS-} ]]; then
+    read -ra long_platforms <<< "${KUBE_BUILD_PLATFORMS}"
+  fi
+
+  for platform_long in "${long_platforms[@]}"; do
+    local platform
+    local platform_tag
+    platform=${platform_long##${LOCAL_OUTPUT_BINPATH}/} # Strip LOCAL_OUTPUT_BINPATH
+    platform_tag=${platform/\//-} # Replace a "/" for a "-"
     kube::log::status "Starting tarball: client $platform_tag"
 
     (
