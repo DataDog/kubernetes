@@ -63,13 +63,14 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
     - name: Create Release for Tags
       id: create_release_tags
-      uses: actions/create-release@v1
+      uses: ncipollo/release-action@v1.8.0
       if: ${{ startsWith(github.ref, 'refs/tags/') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.extract_tags.outputs.tags }}
-        release_name: ${{ steps.extract_tags.outputs.tags }}
+        allowUpdates: true
+        tag: ${{ steps.extract_tags.outputs.tags }}
+        name: ${{ steps.extract_tags.outputs.tags }}
         draft: false
         prerelease: false
   releaseassetsarm:
