@@ -122,19 +122,6 @@ func (cgc *containerGC) removeOldestN(containers []containerGCInfo, toRemove int
 	// Remove from oldest to newest (last to first).
 	numToKeep := len(containers) - toRemove
 	for i := len(containers) - 1; i >= numToKeep; i-- {
-		if containers[i].unknown {
-			// Containers in known state could be running, we should try
-			// to stop it before removal.
-			id := kubecontainer.ContainerID{
-				Type: cgc.manager.runtimeName,
-				ID:   containers[i].id,
-			}
-			message := "Container is in unknown state, try killing it before removal"
-			if err := cgc.manager.killContainer(nil, id, containers[i].name, message, 0); err != nil {
-				klog.Errorf("Failed to stop container %q: %v", containers[i].id, err)
-				continue
-			}
-		}
 		if err := cgc.manager.removeContainer(containers[i].id); err != nil {
 			glog.Errorf("Failed to remove container %q: %v", containers[i].id, err)
 		}

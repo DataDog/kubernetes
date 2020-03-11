@@ -23,7 +23,6 @@ import (
 	"time"
 
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/klog/glog"
 
 	"github.com/golang/glog"
 	v1 "k8s.io/api/core/v1"

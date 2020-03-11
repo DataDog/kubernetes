@@ -2075,6 +2075,7 @@ func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 // HandlePodReconcile is the callback in the SyncHandler interface for pods
 // that should be reconciled.
 func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
+	start := kl.clock.Now()
 	for _, pod := range pods {
 		// Update the pod in pod manager, status manager will do periodically reconcile according
 		// to the pod manager.
