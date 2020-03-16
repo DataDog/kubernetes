@@ -614,39 +614,6 @@ func normalizeStatus(pod *v1.Pod, status *v1.PodStatus) *v1.PodStatus {
 	return status
 }
 
-// mergePodStatus merges oldPodStatus and newPodStatus where pod conditions
-// not owned by kubelet is preserved from oldPodStatus
-// func mergePodStatus(oldPodStatus, newPodStatus v1.PodStatus) v1.PodStatus {
-// 	podConditions := []v1.PodCondition{}
-// 	for _, c := range oldPodStatus.Conditions {
-// 		if !kubetypes.PodConditionByKubelet(c.Type) {
-// 			podConditions = append(podConditions, c)
-// 		}
-// 	}
-
-// 	for _, c := range newPodStatus.Conditions {
-// 		if kubetypes.PodConditionByKubelet(c.Type) {
-// 			podConditions = append(podConditions, c)
-// 		}
-// 	}
-// 	newPodStatus.Conditions = podConditions
-// 	return newPodStatus
-// }
-
-// NeedToReconcilePodReadiness returns if the pod "Ready" condition need to be reconcile
-// func NeedToReconcilePodReadiness(pod *v1.Pod) bool {
-// 	if len(pod.Spec.ReadinessGates) == 0 {
-// 		return false
-// 	}
-// 	podReadyCondition := GeneratePodReadyCondition(&pod.Spec, pod.Status.Conditions, pod.Status.ContainerStatuses, pod.Status.Phase)
-// 	i, curCondition := podutil.GetPodConditionFromList(pod.Status.Conditions, v1.PodReady)
-// 	// Only reconcile if "Ready" condition is present
-// 	if i >= 0 && curCondition.Status != podReadyCondition.Status {
-// 		return true
-// 	}
-// 	return false
-// }
-
 // SidecarsStatus contains three bools, whether the pod has sidecars,
 // if the all the sidecars are ready and if the non sidecars are in a
 // waiting state.
