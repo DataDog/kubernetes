@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -490,45 +490,45 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	parsedNodeIP := net.ParseIP(nodeIP)
 
 	klet := &Kubelet{
-		hostname:                       hostname,
-		nodeName:                       nodeName,
-		kubeClient:                     kubeDeps.KubeClient,
-		heartbeatClient:                kubeDeps.HeartbeatClient,
-		onRepeatedHeartbeatFailure:     kubeDeps.OnHeartbeatFailure,
-		rootDirectory:                  rootDirectory,
-		resyncInterval:                 kubeCfg.SyncFrequency.Duration,
-		sourcesReady:                   config.NewSourcesReady(kubeDeps.PodConfig.SeenAllSources),
-		registerNode:                   registerNode,
-		registerWithTaints:             registerWithTaints,
-		registerSchedulable:            registerSchedulable,
-		dnsConfigurer:                  dns.NewConfigurer(kubeDeps.Recorder, nodeRef, parsedNodeIP, clusterDNS, kubeCfg.ClusterDomain, kubeCfg.ResolverConfig),
-		serviceLister:                  serviceLister,
-		nodeInfo:                       nodeInfo,
-		masterServiceNamespace:         masterServiceNamespace,
-		streamingConnectionIdleTimeout: kubeCfg.StreamingConnectionIdleTimeout.Duration,
-		recorder:                       kubeDeps.Recorder,
-		cadvisor:                       kubeDeps.CAdvisorInterface,
-		cloud:                          kubeDeps.Cloud,
-		externalCloudProvider:     cloudprovider.IsExternal(cloudProvider),
-		providerID:                providerID,
-		nodeRef:                   nodeRef,
-		nodeLabels:                nodeLabels,
-		nodeStatusUpdateFrequency: kubeCfg.NodeStatusUpdateFrequency.Duration,
-		os:                   kubeDeps.OSInterface,
-		oomWatcher:           oomWatcher,
-		cgroupsPerQOS:        kubeCfg.CgroupsPerQOS,
-		cgroupRoot:           kubeCfg.CgroupRoot,
-		mounter:              kubeDeps.Mounter,
-		writer:               kubeDeps.Writer,
-		maxPods:              int(kubeCfg.MaxPods),
-		podsPerCore:          int(kubeCfg.PodsPerCore),
-		syncLoopMonitor:      atomic.Value{},
-		daemonEndpoints:      daemonEndpoints,
-		containerManager:     kubeDeps.ContainerManager,
-		containerRuntimeName: containerRuntime,
-		nodeIP:               parsedNodeIP,
-		nodeIPValidator:      validateNodeIP,
-		clock:                clock.RealClock{},
+		hostname:                                hostname,
+		nodeName:                                nodeName,
+		kubeClient:                              kubeDeps.KubeClient,
+		heartbeatClient:                         kubeDeps.HeartbeatClient,
+		onRepeatedHeartbeatFailure:              kubeDeps.OnHeartbeatFailure,
+		rootDirectory:                           rootDirectory,
+		resyncInterval:                          kubeCfg.SyncFrequency.Duration,
+		sourcesReady:                            config.NewSourcesReady(kubeDeps.PodConfig.SeenAllSources),
+		registerNode:                            registerNode,
+		registerWithTaints:                      registerWithTaints,
+		registerSchedulable:                     registerSchedulable,
+		dnsConfigurer:                           dns.NewConfigurer(kubeDeps.Recorder, nodeRef, parsedNodeIP, clusterDNS, kubeCfg.ClusterDomain, kubeCfg.ResolverConfig),
+		serviceLister:                           serviceLister,
+		nodeInfo:                                nodeInfo,
+		masterServiceNamespace:                  masterServiceNamespace,
+		streamingConnectionIdleTimeout:          kubeCfg.StreamingConnectionIdleTimeout.Duration,
+		recorder:                                kubeDeps.Recorder,
+		cadvisor:                                kubeDeps.CAdvisorInterface,
+		cloud:                                   kubeDeps.Cloud,
+		externalCloudProvider:                   cloudprovider.IsExternal(cloudProvider),
+		providerID:                              providerID,
+		nodeRef:                                 nodeRef,
+		nodeLabels:                              nodeLabels,
+		nodeStatusUpdateFrequency:               kubeCfg.NodeStatusUpdateFrequency.Duration,
+		os:                                      kubeDeps.OSInterface,
+		oomWatcher:                              oomWatcher,
+		cgroupsPerQOS:                           kubeCfg.CgroupsPerQOS,
+		cgroupRoot:                              kubeCfg.CgroupRoot,
+		mounter:                                 kubeDeps.Mounter,
+		writer:                                  kubeDeps.Writer,
+		maxPods:                                 int(kubeCfg.MaxPods),
+		podsPerCore:                             int(kubeCfg.PodsPerCore),
+		syncLoopMonitor:                         atomic.Value{},
+		daemonEndpoints:                         daemonEndpoints,
+		containerManager:                        kubeDeps.ContainerManager,
+		containerRuntimeName:                    containerRuntime,
+		nodeIP:                                  parsedNodeIP,
+		nodeIPValidator:                         validateNodeIP,
+		clock:                                   clock.RealClock{},
 		enableControllerAttachDetach:            kubeCfg.EnableControllerAttachDetach,
 		iptClient:                               utilipt.New(utilexec.New(), utildbus.New(), utilipt.ProtocolIpv4),
 		makeIPTablesUtilChains:                  kubeCfg.MakeIPTablesUtilChains,
@@ -2075,10 +2075,22 @@ func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 // HandlePodReconcile is the callback in the SyncHandler interface for pods
 // that should be reconciled.
 func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
+	start := kl.clock.Now()
 	for _, pod := range pods {
 		// Update the pod in pod manager, status manager will do periodically reconcile according
 		// to the pod manager.
 		kl.podManager.UpdatePod(pod)
+
+		sidecarsStatus := status.GetSidecarsStatus(pod)
+
+		if sidecarsStatus.ContainersWaiting {
+			// if containers aren't running and the sidecars are all ready trigger a sync so that the containers get started
+			if sidecarsStatus.SidecarsPresent && sidecarsStatus.SidecarsReady {
+				glog.Infof("Pod: %s: sidecars: sidecars are ready, dispatching work", format.Pod(pod))
+				mirrorPod, _ := kl.podManager.GetMirrorPodByPod(pod)
+				kl.dispatchWork(pod, kubetypes.SyncPodSync, mirrorPod, start)
+			}
+		}
 
 		// After an evicted pod is synced, all dead containers in the pod can be removed.
 		if eviction.PodIsEvicted(pod.Status) {
