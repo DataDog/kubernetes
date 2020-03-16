@@ -1,3 +1,5 @@
+// +build !providerless
+
 /*
 Copyright 2016 The Kubernetes Authors.
 
@@ -20,11 +22,20 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
+// IPPermissionSet maps IP strings of strings to EC2 IpPermissions
 type IPPermissionSet map[string]*ec2.IpPermission
 
+// IPPermissionPredicate is an predicate to test whether IPPermission matches some condition.
+type IPPermissionPredicate interface {
+	// Test checks whether specified IPPermission matches condition.
+	Test(perm *ec2.IpPermission) bool
+}
+
+// NewIPPermissionSet creates a new IPPermissionSet
 func NewIPPermissionSet(items ...*ec2.IpPermission) IPPermissionSet {
 	s := make(IPPermissionSet)
 	s.Insert(items...)
@@ -88,6 +99,23 @@ func (s IPPermissionSet) Insert(items ...*ec2.IpPermission) {
 	}
 }
 
+// Delete delete permission from the set.
+func (s IPPermissionSet) Delete(items ...*ec2.IpPermission) {
+	for _, p := range items {
+		k := keyForIPPermission(p)
+		delete(s, k)
+	}
+}
+
+// DeleteIf delete permission from the set if permission matches predicate.
+func (s IPPermissionSet) DeleteIf(predicate IPPermissionPredicate) {
+	for k, p := range s {
+		if predicate.Test(p) {
+			delete(s, k)
+		}
+	}
+}
+
 // List returns the contents as a slice.  Order is not defined.
 func (s IPPermissionSet) List() []*ec2.IpPermission {
 	res := make([]*ec2.IpPermission, 0, len(s))
@@ -97,10 +125,10 @@ func (s IPPermissionSet) List() []*ec2.IpPermission {
 	return res
 }
 
-// IsSuperset returns true if and only if s1 is a superset of s2.
-func (s1 IPPermissionSet) IsSuperset(s2 IPPermissionSet) bool {
+// IsSuperset returns true if and only if s is a superset of s2.
+func (s IPPermissionSet) IsSuperset(s2 IPPermissionSet) bool {
 	for k := range s2 {
-		_, found := s1[k]
+		_, found := s[k]
 		if !found {
 			return false
 		}
@@ -108,11 +136,11 @@ func (s1 IPPermissionSet) IsSuperset(s2 IPPermissionSet) bool {
 	return true
 }
 
-// Equal returns true if and only if s1 is equal (as a set) to s2.
+// Equal returns true if and only if s is equal (as a set) to s2.
 // Two sets are equal if their membership is identical.
 // (In practice, this means same elements, order doesn't matter)
-func (s1 IPPermissionSet) Equal(s2 IPPermissionSet) bool {
-	return len(s1) == len(s2) && s1.IsSuperset(s2)
+func (s IPPermissionSet) Equal(s2 IPPermissionSet) bool {
+	return len(s) == len(s2) && s.IsSuperset(s2)
 }
 
 // Difference returns a set of objects that are not in s2
@@ -143,4 +171,48 @@ func keyForIPPermission(p *ec2.IpPermission) string {
 		panic(fmt.Sprintf("error building JSON representation of ec2.IpPermission: %v", err))
 	}
 	return string(v)
+}
+
+var _ IPPermissionPredicate = IPPermissionMatchDesc{}
+
+// IPPermissionMatchDesc checks whether specific IPPermission contains description.
+type IPPermissionMatchDesc struct {
+	Description string
+}
+
+// Test whether specific IPPermission contains description.
+func (p IPPermissionMatchDesc) Test(perm *ec2.IpPermission) bool {
+	for _, v4Range := range perm.IpRanges {
+		if aws.StringValue(v4Range.Description) == p.Description {
+			return true
+		}
+	}
+	for _, v6Range := range perm.Ipv6Ranges {
+		if aws.StringValue(v6Range.Description) == p.Description {
+			return true
+		}
+	}
+	for _, prefixListID := range perm.PrefixListIds {
+		if aws.StringValue(prefixListID.Description) == p.Description {
+			return true
+		}
+	}
+	for _, group := range perm.UserIdGroupPairs {
+		if aws.StringValue(group.Description) == p.Description {
+			return true
+		}
+	}
+	return false
+}
+
+var _ IPPermissionPredicate = IPPermissionNotMatch{}
+
+// IPPermissionNotMatch is the *not* operator for Predicate
+type IPPermissionNotMatch struct {
+	Predicate IPPermissionPredicate
+}
+
+// Test whether specific IPPermission not match the embed predicate.
+func (p IPPermissionNotMatch) Test(perm *ec2.IpPermission) bool {
+	return !p.Predicate.Test(perm)
 }

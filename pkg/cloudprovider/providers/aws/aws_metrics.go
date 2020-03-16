@@ -1,3 +1,5 @@
+// +build !providerless
+
 /*
 Copyright 2017 The Kubernetes Authors.
 
@@ -16,25 +18,59 @@ limitations under the License.
 
 package aws
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync"
 
-var awsApiMetric = prometheus.NewHistogramVec(
-	prometheus.HistogramOpts{
-		Name: "cloudprovider_aws_api_request_duration_seconds",
-		Help: "Latency of aws api call",
-	},
-	[]string{"request"},
+	"github.com/prometheus/client_golang/prometheus"
+
+	"k8s.io/component-base/metrics"
+	"k8s.io/component-base/metrics/legacyregistry"
 )
 
-var awsApiErrorMetric = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "cloudprovider_aws_api_request_errors",
-		Help: "AWS Api errors",
-	},
-	[]string{"request"},
+var (
+	awsAPIMetric = metrics.NewHistogramVec(
+		&metrics.HistogramOpts{
+			Name:           "cloudprovider_aws_api_request_duration_seconds",
+			Help:           "Latency of AWS API calls",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"request"})
+
+	awsAPIErrorMetric = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Name:           "cloudprovider_aws_api_request_errors",
+			Help:           "AWS API errors",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"request"})
+
+	awsAPIThrottlesMetric = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Name:           "cloudprovider_aws_api_throttled_requests_total",
+			Help:           "AWS API throttled requests",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"operation_name"})
 )
+
+func recordAWSMetric(actionName string, timeTaken float64, err error) {
+	if err != nil {
+		awsAPIErrorMetric.With(prometheus.Labels{"request": actionName}).Inc()
+	} else {
+		awsAPIMetric.With(prometheus.Labels{"request": actionName}).Observe(timeTaken)
+	}
+}
+
+func recordAWSThrottlesMetric(operation string) {
+	awsAPIThrottlesMetric.With(prometheus.Labels{"operation_name": operation}).Inc()
+}
+
+var registerOnce sync.Once
 
 func registerMetrics() {
-	prometheus.MustRegister(awsApiMetric)
-	prometheus.MustRegister(awsApiErrorMetric)
+	registerOnce.Do(func() {
+		legacyregistry.MustRegister(awsAPIMetric)
+		legacyregistry.MustRegister(awsAPIErrorMetric)
+		legacyregistry.MustRegister(awsAPIThrottlesMetric)
+	})
 }
