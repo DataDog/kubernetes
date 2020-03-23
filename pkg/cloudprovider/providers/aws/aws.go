@@ -1342,9 +1342,13 @@ func (c *Cloud) ExternalID(ctx context.Context, nodeName types.NodeName) (string
 	}
 	// We must verify that the instance still exists
 	// Note that if the instance does not exist or is no longer running, we must return ("", cloudprovider.InstanceNotFound)
-	instance, err := c.findInstanceByNodeName(nodeName)
+	instance, err := c.getInstanceByNodeName(nodeName)
 	if err != nil {
-		return "", err
+		if err == cloudprovider.InstanceNotFound {
+			// The Instances interface requires that we return InstanceNotFound (without wrapping)
+			return "", err
+		}
+		return "", fmt.Errorf("getInstanceByNodeName failed for %q with %q", nodeName, err)
 	}
 	if instance == nil {
 		return "", cloudprovider.InstanceNotFound
@@ -1393,6 +1397,10 @@ func (c *Cloud) InstanceID(ctx context.Context, nodeName types.NodeName) (string
 	}
 	inst, err := c.getInstanceByNodeName(nodeName)
 	if err != nil {
+		if err == cloudprovider.InstanceNotFound {
+			// The Instances interface requires that we return InstanceNotFound (without wrapping)
+			return "", err
+		}
 		return "", fmt.Errorf("getInstanceByNodeName failed for %q with %q", nodeName, err)
 	}
 	return "/" + aws.StringValue(inst.Placement.AvailabilityZone) + "/" + aws.StringValue(inst.InstanceId), nil
