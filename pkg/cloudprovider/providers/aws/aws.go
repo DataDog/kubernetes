@@ -4343,6 +4343,10 @@ func (c *Cloud) getInstanceByNodeName(nodeName types.NodeName) (*ec2.Instance, e
 		instance, err = c.findInstanceByNodeName(nodeName)
 	} else {
 		instance, err = c.getInstanceByID(string(awsID))
+		// Unless it's running, pretend it was not found
+		if err == nil && *instance.State.Name != "running" {
+			instance = nil
+		}
 	}
 	if err == nil && instance == nil {
 		return nil, cloudprovider.InstanceNotFound
