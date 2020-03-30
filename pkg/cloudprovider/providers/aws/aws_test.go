@@ -851,22 +851,45 @@ func TestGetInstanceByNodeNameBatching(t *testing.T) {
 	tag.Key = aws.String(TagNameKubernetesClusterPrefix + TestClusterId)
 	tag.Value = aws.String("")
 	tags := []*ec2.Tag{&tag}
+
+	// Prepare fake node cache
+	fakeClient := &fake.Clientset{}
+	fakeInformerFactory := informers.NewSharedInformerFactory(fakeClient, 0)
+	c.SetInformers(fakeInformerFactory)
+	c.nodeInformerHasSynced = informerSynced
+
 	nodeNames := []string{}
 	for i := 0; i < 200; i++ {
 		nodeName := fmt.Sprintf("ip-171-20-42-%d.ec2.internal", i)
 		nodeNames = append(nodeNames, nodeName)
 		ec2Instance := &ec2.Instance{}
 		instanceId := fmt.Sprintf("i-abcedf%d", i)
+		testProviderID := "aws:///us-east-1c/" + instanceId
 		ec2Instance.InstanceId = aws.String(instanceId)
 		ec2Instance.PrivateDnsName = aws.String(nodeName)
 		ec2Instance.State = &ec2.InstanceState{Code: aws.Int64(48), Name: aws.String("running")}
 		ec2Instance.Tags = tags
 		awsServices.instances = append(awsServices.instances, ec2Instance)
 
+		// Add half the instances to the cache
+		if i%2 == 0 {
+			err = c.nodeInformer.Informer().GetStore().Add(&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: string(nodeName),
+				},
+				Spec: v1.NodeSpec{
+					ProviderID: testProviderID,
+				},
+			})
+		}
 	}
 
 	instances, err := c.getInstancesByNodeNames(nodeNames)
 	assert.NotEmpty(t, instances)
+	assert.Equal(t, 200, len(instances), "Expected 200 but got less")
+
+	instances2, err := c.getInstancesByNodeNames(nodeNames, "running")
+	assert.NotEmpty(t, instances2)
 	assert.Equal(t, 200, len(instances), "Expected 200 but got less")
 }
 

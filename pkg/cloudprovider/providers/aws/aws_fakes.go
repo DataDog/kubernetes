@@ -490,6 +490,13 @@ func (kms *FakeKMS) DescribeKey(*kms.DescribeKeyInput) (*kms.DescribeKeyOutput, 
 
 func instanceMatchesFilter(instance *ec2.Instance, filter *ec2.Filter) bool {
 	name := *filter.Name
+	if name == "instance-id" {
+		if instance.InstanceId == nil {
+			return false
+		}
+		return contains(filter.Values, *instance.InstanceId)
+	}
+
 	if name == "private-dns-name" {
 		if instance.PrivateDnsName == nil {
 			return false

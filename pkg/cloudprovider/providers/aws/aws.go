@@ -227,6 +227,10 @@ const (
 	// Number of node names that can be added to a filter. The AWS limit is 200
 	// but we are using a lower limit on purpose
 	filterNodeLimit = 150
+
+	// Number of node names that can be added to a filter on instance-id. Aligned
+	// with describe-instances MaxResults limit.
+	requestInstanceIDLimit = 1000
 )
 
 // awsTagNameMasterRoles is a set of well-known AWS tag names that indicate the instance is a master
@@ -2373,7 +2377,7 @@ func (c *Cloud) GetVolumeLabels(volumeName KubernetesVolumeID) (map[string]strin
 	labels := make(map[string]string)
 	az := aws.StringValue(info.AvailabilityZone)
 	if az == "" {
-		return nil, fmt.Errorf("volume did not have AZ information: %q", info.VolumeId)
+		return nil, fmt.Errorf("volume did not have AZ information: %s", *info.VolumeId)
 	}
 
 	labels[kubeletapis.LabelZoneFailureDomain] = az
@@ -4238,9 +4242,76 @@ func (c *Cloud) getInstancesByIDs(instanceIDs []*string) (map[string]*ec2.Instan
 }
 
 func (c *Cloud) getInstancesByNodeNames(nodeNames []string, states ...string) ([]*ec2.Instance, error) {
-	names := aws.StringSlice(nodeNames)
 	ec2Instances := []*ec2.Instance{}
+	names := aws.StringSlice(nodeNames)
 
+	instanceIDs := make([]*string, 0, len(nodeNames))
+	namesWithoutIDs := make([]*string, 0, len(nodeNames))
+	for _, name := range names {
+		instanceID, err := c.nodeNameToProviderID(types.NodeName(*name))
+		if err != nil {
+			namesWithoutIDs = append(namesWithoutIDs, name)
+		} else {
+			instanceIDString := string(instanceID)
+			instanceIDs = append(instanceIDs, &instanceIDString)
+		}
+	}
+
+	glog.V(2).Infof("getInstancesByNodeNames: look up %d by instance ID, %d by DNS name, out of %d", len(instanceIDs), len(namesWithoutIDs), len(names))
+
+	if len(namesWithoutIDs) > 0 {
+		instancesFromNames, err := c.getInstancesByPrivateDNSNames(namesWithoutIDs, states...)
+		if err != nil {
+			return nil, err
+		}
+		ec2Instances = append(ec2Instances, instancesFromNames...)
+	}
+
+	if len(instanceIDs) > 0 {
+		instancesFromIDs, err := c.getInstancesByInstanceIDs(instanceIDs, states...)
+		if err != nil {
+			return nil, err
+		}
+		ec2Instances = append(ec2Instances, instancesFromIDs...)
+	}
+
+	if len(ec2Instances) == 0 {
+		glog.V(3).Infof("Failed to find any instances %v", nodeNames)
+		return nil, nil
+	}
+	return ec2Instances, nil
+}
+
+func (c *Cloud) getInstancesByInstanceIDs(instanceIDs []*string, states ...string) ([]*ec2.Instance, error) {
+	ec2Instances := []*ec2.Instance{}
+	for i := 0; i < len(instanceIDs); i += requestInstanceIDLimit {
+		end := i + requestInstanceIDLimit
+		if end > len(instanceIDs) {
+			end = len(instanceIDs)
+		}
+
+		instanceSlice := instanceIDs[i:end]
+
+		request := &ec2.DescribeInstancesInput{
+			InstanceIds: instanceSlice,
+		}
+
+		if len(states) > 0 {
+			request.Filters = []*ec2.Filter{newEc2Filter("instance-state-name", states...)}
+		}
+
+		instances, err := c.ec2.DescribeInstances(request)
+		if err != nil {
+			glog.V(2).Infof("Failed to describe instances by instance IDs %v: %v", instanceSlice, err)
+			return nil, err
+		}
+		ec2Instances = append(ec2Instances, instances...)
+	}
+	return ec2Instances, nil
+}
+
+func (c *Cloud) getInstancesByPrivateDNSNames(names []*string, states ...string) ([]*ec2.Instance, error) {
+	ec2Instances := []*ec2.Instance{}
 	for i := 0; i < len(names); i += filterNodeLimit {
 		end := i + filterNodeLimit
 		if end > len(names) {
@@ -4261,15 +4332,10 @@ func (c *Cloud) getInstancesByNodeNames(nodeNames []string, states ...string) ([
 
 		instances, err := c.describeInstances(filters)
 		if err != nil {
-			glog.V(2).Infof("Failed to describe instances %v", nodeNames)
+			glog.V(2).Infof("Failed to describe instances by private DNS names %v: %v", nameSlice, err)
 			return nil, err
 		}
 		ec2Instances = append(ec2Instances, instances...)
-	}
-
-	if len(ec2Instances) == 0 {
-		glog.V(3).Infof("Failed to find any instances %v", nodeNames)
-		return nil, nil
 	}
 	return ec2Instances, nil
 }
