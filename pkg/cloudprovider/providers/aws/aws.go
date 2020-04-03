@@ -775,6 +775,9 @@ func (s *awsSdkEC2) DescribeInstances(request *ec2.DescribeInstancesInput) ([]*e
 		response, err := s.ec2.DescribeInstances(request)
 		if err != nil {
 			recordAwsMetric("describe_instance", 0, err)
+			if reqerr, ok := err.(awserr.RequestFailure); ok {
+				return nil, fmt.Errorf("error listing AWS instances (requestID: %s): %q", reqerr.RequestID(), err)
+			}
 			return nil, fmt.Errorf("error listing AWS instances: %q", err)
 		}
 
