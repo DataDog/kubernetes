@@ -127,6 +127,58 @@ func TestParseInstance(t *testing.T) {
 	}
 }
 
+func TestParseInstanceForZone(t *testing.T) {
+	tests := []struct {
+		Kubernetes  kubernetesInstanceID
+		Zone         string
+		ExpectError bool
+	}{
+		{
+			Kubernetes: "aws:///us-east-1a/i-12345678",
+			Zone:        "us-east-1a",
+		},
+		{
+			Kubernetes: "aws:////i-12345678",
+			ExpectError: true,
+		},
+		{
+			Kubernetes: "i-12345678",
+			ExpectError: true,
+		},
+		{
+			Kubernetes: "aws:///us-east-1a/i-12345678abcdef01",
+			Zone:        "us-east-1a",
+		},
+		{
+			Kubernetes: "aws:////i-12345678abcdef01",
+			ExpectError: true,
+		},
+		{
+			Kubernetes: "i-12345678abcdef01",
+			ExpectError: true,
+		},
+		{
+			Kubernetes:  "",
+			ExpectError: true,
+		},
+	}
+
+	for _, test := range tests {
+		awsZone, err := test.Kubernetes.mapToAWSZone()
+		if err != nil {
+			if !test.ExpectError {
+				t.Errorf("unexpected error parsing %s: %v", test.Kubernetes, err)
+			}
+		} else {
+			if test.ExpectError {
+				t.Errorf("expected error parsing %s", test.Kubernetes)
+			} else if test.Zone != awsZone {
+				t.Errorf("unexpected value parsing %s, got %s", test.Kubernetes, awsZone)
+			}
+		}
+	}
+}
+
 func TestSnapshotMeetsCriteria(t *testing.T) {
 	snapshot := &allInstancesSnapshot{timestamp: time.Now().Add(-3601 * time.Second)}
 
