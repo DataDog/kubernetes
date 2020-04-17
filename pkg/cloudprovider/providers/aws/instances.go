@@ -88,6 +88,25 @@ func (name kubernetesInstanceID) mapToAWSInstanceID() (InstanceID, error) {
 	return InstanceID(awsID), nil
 }
 
+// mapToAWSZone extracts the zone from the KubernetesInstanceID
+func (name kubernetesInstanceID) mapToAWSZone() (string, error) {
+	s := string(name)
+
+	if !strings.HasPrefix(s, "aws://") {
+		return "", fmt.Errorf("Incomplete instance ID, can't extract zone (%s)", name)
+	}
+	url, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("Invalid instance name (%s): %v", name, err)
+	}
+
+	tokens := strings.Split(strings.Trim(url.Path, "/"), "/")
+	if len(tokens) != 2 {
+		return "", fmt.Errorf("Instance name has unexpected number of components (%s)", name)
+	}
+	return tokens[0], nil
+}
+
 // mapToAWSInstanceID extracts the InstanceIDs from the Nodes, returning an error if a Node cannot be mapped
 func mapToAWSInstanceIDs(nodes []*v1.Node) ([]InstanceID, error) {
 	var instanceIDs []InstanceID

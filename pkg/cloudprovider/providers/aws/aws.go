@@ -53,6 +53,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -198,6 +199,8 @@ const ServiceAnnotationLoadBalancerHCTimeout = "service.beta.kubernetes.io/aws-l
 // service to specify, in seconds, the interval between health checks.
 const ServiceAnnotationLoadBalancerHCInterval = "service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval"
 
+const labelNodeRoleMaster = "node-role.kubernetes.io/master"
+
 // Event key when a volume is stuck on attaching state when being attached to a volume
 const volumeAttachmentStuck = "VolumeAttachmentStuck"
 
@@ -227,6 +230,10 @@ const (
 	// Number of node names that can be added to a filter. The AWS limit is 200
 	// but we are using a lower limit on purpose
 	filterNodeLimit = 150
+
+	// Number of node names that can be added to a filter on instance-id. Aligned
+	// with describe-instances MaxResults limit.
+	requestInstanceIDLimit = 1000
 )
 
 // awsTagNameMasterRoles is a set of well-known AWS tag names that indicate the instance is a master
@@ -771,6 +778,9 @@ func (s *awsSdkEC2) DescribeInstances(request *ec2.DescribeInstancesInput) ([]*e
 		response, err := s.ec2.DescribeInstances(request)
 		if err != nil {
 			recordAwsMetric("describe_instance", 0, err)
+			if reqerr, ok := err.(awserr.RequestFailure); ok {
+				return nil, fmt.Errorf("error listing AWS instances (requestID: %s): %q", reqerr.RequestID(), err)
+			}
 			return nil, fmt.Errorf("error listing AWS instances: %q", err)
 		}
 
@@ -1435,15 +1445,29 @@ func (c *Cloud) InstanceType(ctx context.Context, nodeName types.NodeName) (stri
 	return aws.StringValue(inst.InstanceType), nil
 }
 
-// getCandidateZonesForDynamicVolume retrieves  a list of all the zones in which nodes are running
-// It currently involves querying all instances
+// getCandidateZonesForDynamicVolume retrieves a list of all the zones in which nodes are running
 func (c *Cloud) getCandidateZonesForDynamicVolume() (sets.String, error) {
 	// We don't currently cache this; it is currently used only in volume
 	// creation which is expected to be a comparatively rare occurrence.
 
 	// TODO: Caching / expose v1.Nodes to the cloud provider?
 	// TODO: We could also query for subnets, I think
+	zones, err := c.getCandidateZonesForDynamicVolumeViaInformer()
+	if err != nil {
+		glog.V(2).Infof("getCachedCandidateZonesForDynamicVolume() failed, falling back to legacy method: %v", err)
+		zones, err = c.getCandidateZonesForDynamicVolumeViaAWS()
+		if err != nil {
+			return nil, err
+		}
+	}
 
+	glog.V(2).Infof("Found instances in zones %s", zones)
+
+	return zones, nil
+}
+
+// getCandidateZonesForDynamicVolume retrieves a list of all the zones in which nodes are running via DescribeInstances
+func (c *Cloud) getCandidateZonesForDynamicVolumeViaAWS() (sets.String, error) {
 	filters := []*ec2.Filter{newEc2Filter("instance-state-name", "running")}
 
 	instances, err := c.describeInstances(filters)
@@ -1480,7 +1504,44 @@ func (c *Cloud) getCandidateZonesForDynamicVolume() (sets.String, error) {
 		}
 	}
 
-	glog.V(2).Infof("Found instances in zones %s", zones)
+	return zones, nil
+}
+
+// getCandidateZonesForDynamicVolume retrieves a list of all the zones in which nodes are running using the NodeInformer
+func (c *Cloud) getCandidateZonesForDynamicVolumeViaInformer() (sets.String, error) {
+	if c.nodeInformerHasSynced == nil || !c.nodeInformerHasSynced() {
+		return nil, fmt.Errorf("node informer has not synced yet")
+	}
+
+	// We skip master nodes; this avoids creating a volume in a zone where only the master is running - e.g. #34583
+	// This is a short-term workaround until the scheduler takes care of zone selection
+	noMasterRule := "!" + labelNodeRoleMaster
+	noMasterSelector, err := labels.Parse(noMasterRule)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing no-master selector rule (%s): %v", noMasterRule, err)
+	}
+
+	nodeList, err := c.nodeInformer.Lister().List(noMasterSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	zones := sets.NewString()
+
+	for _, node := range nodeList {
+		if len(node.Spec.ProviderID) == 0 {
+			glog.V(2).Infof("Can't extract zone: node %s has no providerID", node.Name)
+			continue
+		}
+
+		zone, err := kubernetesInstanceID(node.Spec.ProviderID).mapToAWSZone()
+		if err != nil {
+			glog.V(2).Infof("Can't extract zone: error parsing node %s provider ID (%s): %v", node.Name, node.Spec.ProviderID, err)
+			continue
+		}
+		zones.Insert(zone)
+	}
+
 	return zones, nil
 }
 
@@ -2373,7 +2434,7 @@ func (c *Cloud) GetVolumeLabels(volumeName KubernetesVolumeID) (map[string]strin
 	labels := make(map[string]string)
 	az := aws.StringValue(info.AvailabilityZone)
 	if az == "" {
-		return nil, fmt.Errorf("volume did not have AZ information: %q", info.VolumeId)
+		return nil, fmt.Errorf("volume did not have AZ information: %s", *info.VolumeId)
 	}
 
 	labels[kubeletapis.LabelZoneFailureDomain] = az
@@ -4238,9 +4299,76 @@ func (c *Cloud) getInstancesByIDs(instanceIDs []*string) (map[string]*ec2.Instan
 }
 
 func (c *Cloud) getInstancesByNodeNames(nodeNames []string, states ...string) ([]*ec2.Instance, error) {
-	names := aws.StringSlice(nodeNames)
 	ec2Instances := []*ec2.Instance{}
+	names := aws.StringSlice(nodeNames)
 
+	instanceIDs := make([]*string, 0, len(nodeNames))
+	namesWithoutIDs := make([]*string, 0, len(nodeNames))
+	for _, name := range names {
+		instanceID, err := c.nodeNameToProviderID(types.NodeName(*name))
+		if err != nil {
+			namesWithoutIDs = append(namesWithoutIDs, name)
+		} else {
+			instanceIDString := string(instanceID)
+			instanceIDs = append(instanceIDs, &instanceIDString)
+		}
+	}
+
+	glog.V(2).Infof("getInstancesByNodeNames: look up %d by instance ID, %d by DNS name, out of %d", len(instanceIDs), len(namesWithoutIDs), len(names))
+
+	if len(namesWithoutIDs) > 0 {
+		instancesFromNames, err := c.getInstancesByPrivateDNSNames(namesWithoutIDs, states...)
+		if err != nil {
+			return nil, err
+		}
+		ec2Instances = append(ec2Instances, instancesFromNames...)
+	}
+
+	if len(instanceIDs) > 0 {
+		instancesFromIDs, err := c.getInstancesByInstanceIDs(instanceIDs, states...)
+		if err != nil {
+			return nil, err
+		}
+		ec2Instances = append(ec2Instances, instancesFromIDs...)
+	}
+
+	if len(ec2Instances) == 0 {
+		glog.V(3).Infof("Failed to find any instances %v", nodeNames)
+		return nil, nil
+	}
+	return ec2Instances, nil
+}
+
+func (c *Cloud) getInstancesByInstanceIDs(instanceIDs []*string, states ...string) ([]*ec2.Instance, error) {
+	ec2Instances := []*ec2.Instance{}
+	for i := 0; i < len(instanceIDs); i += requestInstanceIDLimit {
+		end := i + requestInstanceIDLimit
+		if end > len(instanceIDs) {
+			end = len(instanceIDs)
+		}
+
+		instanceSlice := instanceIDs[i:end]
+
+		request := &ec2.DescribeInstancesInput{
+			InstanceIds: instanceSlice,
+		}
+
+		if len(states) > 0 {
+			request.Filters = []*ec2.Filter{newEc2Filter("instance-state-name", states...)}
+		}
+
+		instances, err := c.ec2.DescribeInstances(request)
+		if err != nil {
+			glog.V(2).Infof("Failed to describe instances by instance IDs %v: %v", instanceSlice, err)
+			return nil, err
+		}
+		ec2Instances = append(ec2Instances, instances...)
+	}
+	return ec2Instances, nil
+}
+
+func (c *Cloud) getInstancesByPrivateDNSNames(names []*string, states ...string) ([]*ec2.Instance, error) {
+	ec2Instances := []*ec2.Instance{}
 	for i := 0; i < len(names); i += filterNodeLimit {
 		end := i + filterNodeLimit
 		if end > len(names) {
@@ -4261,15 +4389,10 @@ func (c *Cloud) getInstancesByNodeNames(nodeNames []string, states ...string) ([
 
 		instances, err := c.describeInstances(filters)
 		if err != nil {
-			glog.V(2).Infof("Failed to describe instances %v", nodeNames)
+			glog.V(2).Infof("Failed to describe instances by private DNS names %v: %v", nameSlice, err)
 			return nil, err
 		}
 		ec2Instances = append(ec2Instances, instances...)
-	}
-
-	if len(ec2Instances) == 0 {
-		glog.V(3).Infof("Failed to find any instances %v", nodeNames)
-		return nil, nil
 	}
 	return ec2Instances, nil
 }
