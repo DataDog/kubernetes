@@ -61,6 +61,13 @@ type vmssMetaInfo struct {
 	resourceGroup string
 }
 
+type nodeIDs struct {
+	vmssName      string
+	resourceGroup string
+	instanceID    string
+	nodeName      string
+}
+
 // scaleSet implements VMSet interface for Azure scale set.
 type scaleSet struct {
 	*Cloud
@@ -70,7 +77,7 @@ type scaleSet struct {
 	availabilitySet VMSet
 
 	vmssCache                 *azcache.TimedCache
-	vmssVMCache               *azcache.TimedCache
+	vmssVMCache               *sync.Map // [vmsskey]*azcache.TimedCache
 	availabilitySetNodesCache *azcache.TimedCache
 }
 
@@ -80,6 +87,7 @@ func newScaleSet(az *Cloud) (VMSet, error) {
 	ss := &scaleSet{
 		Cloud:           az,
 		availabilitySet: newAvailabilitySet(az),
+		vmssVMCache:     &sync.Map{},
 	}
 
 	if !ss.DisableAvailabilitySetNodes {
@@ -90,11 +98,6 @@ func newScaleSet(az *Cloud) (VMSet, error) {
 	}
 
 	ss.vmssCache, err = ss.newVMSSCache()
-	if err != nil {
-		return nil, err
-	}
-
-	ss.vmssVMCache, err = ss.newVMSSVirtualMachinesCache()
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +142,15 @@ func (ss *scaleSet) getVMSS(vmssName string, crt azcache.AzureCacheReadType) (*c
 	return vmss, nil
 }
 
-// getVmssVM gets virtualMachineScaleSetVM by nodeName from cache.
-// It returns cloudprovider.InstanceNotFound if node does not belong to any scale sets.
-func (ss *scaleSet) getVmssVM(nodeName string, crt azcache.AzureCacheReadType) (string, string, *compute.VirtualMachineScaleSetVM, error) {
+func (ss *scaleSet) getVmssVMByNodeIDs(node *nodeIDs, crt azcache.AzureCacheReadType) (string, string, *compute.VirtualMachineScaleSetVM, error) {
+	cacheKey, cache, err := ss.getVMSSVMCache(node.resourceGroup, node.vmssName)
+	if err != nil {
+		return "", "", nil, err
+	}
+
 	getter := func(nodeName string, crt azcache.AzureCacheReadType) (string, string, *compute.VirtualMachineScaleSetVM, bool, error) {
 		var found bool
-		cached, err := ss.vmssVMCache.Get(vmssVirtualMachinesKey, crt)
+		cached, err := cache.Get(cacheKey, crt)
 		if err != nil {
 			return "", "", nil, found, err
 		}
@@ -159,19 +165,19 @@ func (ss *scaleSet) getVmssVM(nodeName string, crt azcache.AzureCacheReadType) (
 		return "", "", nil, found, nil
 	}
 
-	_, err := getScaleSetVMInstanceID(nodeName)
+	_, err = getScaleSetVMInstanceID(node.nodeName)
 	if err != nil {
 		return "", "", nil, err
 	}
 
-	vmssName, instanceID, vm, found, err := getter(nodeName, crt)
+	vmssName, instanceID, vm, found, err := getter(node.nodeName, crt)
 	if err != nil {
 		return "", "", nil, err
 	}
 
 	if !found {
-		klog.V(2).Infof("Couldn't find VMSS VM with nodeName %s, refreshing the cache", nodeName)
-		vmssName, instanceID, vm, found, err = getter(nodeName, azcache.CacheReadTypeForceRefresh)
+		klog.V(2).Infof("Couldn't find VMSS VM with nodeName %s, refreshing the cache", node.nodeName)
+		vmssName, instanceID, vm, found, err = getter(node.nodeName, azcache.CacheReadTypeForceRefresh)
 		if err != nil {
 			return "", "", nil, err
 		}
@@ -185,6 +191,16 @@ func (ss *scaleSet) getVmssVM(nodeName string, crt azcache.AzureCacheReadType) (
 		return "", "", nil, cloudprovider.InstanceNotFound
 	}
 	return vmssName, instanceID, vm, nil
+}
+
+// getVmssVM gets virtualMachineScaleSetVM by nodeName from cache.
+// It returns cloudprovider.InstanceNotFound if node does not belong to any scale sets.
+func (ss *scaleSet) getVmssVM(nodeName string, crt azcache.AzureCacheReadType) (string, string, *compute.VirtualMachineScaleSetVM, error) {
+	node, err := ss.getNodeIDsByNodeName(nodeName, crt)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return ss.getVmssVMByNodeIDs(node, crt)
 }
 
 // GetPowerStatusByNodeName returns the power state of the specified node.
@@ -222,8 +238,13 @@ func (ss *scaleSet) GetPowerStatusByNodeName(name string) (powerState string, er
 // getCachedVirtualMachineByInstanceID gets scaleSetVMInfo from cache.
 // The node must belong to one of scale sets.
 func (ss *scaleSet) getVmssVMByInstanceID(resourceGroup, scaleSetName, instanceID string, crt azcache.AzureCacheReadType) (*compute.VirtualMachineScaleSetVM, error) {
+	cacheKey, cache, err := ss.getVMSSVMCache(resourceGroup, scaleSetName)
+	if err != nil {
+		return nil, err
+	}
+
 	getter := func(crt azcache.AzureCacheReadType) (vm *compute.VirtualMachineScaleSetVM, found bool, err error) {
-		cached, err := ss.vmssVMCache.Get(vmssVirtualMachinesKey, crt)
+		cached, err := cache.Get(cacheKey, crt)
 		if err != nil {
 			return nil, false, err
 		}
@@ -249,6 +270,7 @@ func (ss *scaleSet) getVmssVMByInstanceID(resourceGroup, scaleSetName, instanceI
 	if err != nil {
 		return nil, err
 	}
+
 	if !found {
 		klog.V(2).Infof("Couldn't find VMSS VM with scaleSetName %q and instanceID %q, refreshing the cache", scaleSetName, instanceID)
 		vm, found, err = getter(azcache.CacheReadTypeForceRefresh)
@@ -256,6 +278,7 @@ func (ss *scaleSet) getVmssVMByInstanceID(resourceGroup, scaleSetName, instanceI
 			return nil, err
 		}
 	}
+
 	if found && vm != nil {
 		return vm, nil
 	}
@@ -583,6 +606,51 @@ func (ss *scaleSet) listScaleSets(resourceGroup string) ([]string, error) {
 	}
 
 	return ssNames, nil
+}
+
+func (ss *scaleSet) getNodeIDsByNodeName(nodeName string, crt azcache.AzureCacheReadType) (*nodeIDs, error) {
+	cached, err := ss.vmssCache.Get(vmssKey, crt)
+	if err != nil {
+		return nil, err
+	}
+
+	instanceID, err := getScaleSetVMInstanceID(nodeName)
+	if err != nil {
+		return nil, err
+	}
+
+	node := &nodeIDs{
+		nodeName: nodeName,
+	}
+
+	vmsses := cached.(*sync.Map)
+	vmsses.Range(func(key, value interface{}) bool {
+		v := value.(*vmssEntry)
+		if v.vmss.Name == nil {
+			return true
+		}
+
+		vmssPrefix := *v.vmss.Name
+		if v.vmss.VirtualMachineProfile.OsProfile != nil &&
+			v.vmss.VirtualMachineProfile.OsProfile.ComputerNamePrefix != nil {
+			vmssPrefix = *v.vmss.VirtualMachineProfile.OsProfile.ComputerNamePrefix
+		}
+
+		if strings.EqualFold(vmssPrefix, nodeName[:len(nodeName)-6]) {
+			node.vmssName = vmssPrefix
+			node.resourceGroup = v.resourceGroup
+			node.instanceID = instanceID
+			return false
+		}
+
+		return true
+	})
+
+	if node.vmssName == "" {
+		return nil, cloudprovider.InstanceNotFound
+	}
+
+	return node, nil
 }
 
 // listScaleSetVMs lists VMs belonging to the specified scale set.
@@ -1276,6 +1344,7 @@ func (ss *scaleSet) ensureBackendPoolDeletedFromVMSS(service *v1.Service, backen
 				continue
 			}
 			// only vmsses in the resource group same as it's in azure config are included
+
 			if strings.EqualFold(resourceGroupName, ss.ResourceGroup) {
 				vmssNamesMap[vmssName] = true
 			}

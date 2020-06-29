@@ -182,6 +182,9 @@ func (az *Cloud) InstanceExistsByProviderID(ctx context.Context, providerID stri
 	}
 
 	name, err := az.vmSet.GetNodeNameByProviderID(providerID)
+	klog.Errorf("BENXXX InstanceExistsByProviderID call: returning true for safety, providerID=%s, name=%s", providerID, name)
+	return true, nil // XXX BENXXX - don't risk swipping all instances while Im messing around that codebase!
+
 	if err != nil {
 		if err == cloudprovider.InstanceNotFound {
 			return false, nil
@@ -227,6 +230,9 @@ func (az *Cloud) InstanceShutdownByProviderID(ctx context.Context, providerID st
 	}
 	klog.V(5).Infof("InstanceShutdownByProviderID gets power status %q for node %q", powerStatus, nodeName)
 
+	result := strings.ToLower(powerStatus) == vmPowerStateStopped || strings.ToLower(powerStatus) == vmPowerStateDeallocated
+	klog.Errorf("BENXXX InstanceShutdownByProviderID force returning false for safety, providerID=%s, result=%t", providerID, result)
+	return false, nil // BENXXX - don't risk wipping all nodes due to a bug while I'm hacking that cloud provider!
 	return strings.ToLower(powerStatus) == vmPowerStateStopped || strings.ToLower(powerStatus) == vmPowerStateDeallocated, nil
 }
 
