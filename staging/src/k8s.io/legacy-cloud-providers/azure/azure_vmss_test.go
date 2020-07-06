@@ -57,10 +57,18 @@ func setTestVirtualMachineCloud(ss *Cloud, scaleSetName, zone string, faultDomai
 	interfaceClient := newFakeAzureInterfacesClient()
 
 	// set test scale sets.
+	computerNamePrefix := fmt.Sprintf("%see6c2", scaleSetName)
 	scaleSets := make(map[string]map[string]compute.VirtualMachineScaleSet)
 	scaleSets["rg"] = map[string]compute.VirtualMachineScaleSet{
 		scaleSetName: {
 			Name: &scaleSetName,
+			VirtualMachineScaleSetProperties: &compute.VirtualMachineScaleSetProperties{
+				VirtualMachineProfile: &compute.VirtualMachineScaleSetVMProfile{
+					OsProfile: &compute.VirtualMachineScaleSetOSProfile{
+						ComputerNamePrefix: &computerNamePrefix,
+					},
+				},
+			},
 		},
 	}
 	virtualMachineScaleSetsClient.setFakeStore(scaleSets)
@@ -209,21 +217,21 @@ func TestGetInstanceIDByNodeName(t *testing.T) {
 	}{
 		{
 			description: "scaleSet should get instance by node name",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "vmssee6c2000001",
-			expected:    "/subscriptions/script/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/ss/virtualMachines/1",
+			expected:    "/subscriptions/script/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/1",
 		},
 		{
 			description: "scaleSet should get instance by node name with upper cases hostname",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"VMSSEE6C2000000", "VMSSEE6C2000001"},
 			nodeName:    "vmssee6c2000000",
-			expected:    "/subscriptions/script/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/ss/virtualMachines/0",
+			expected:    "/subscriptions/script/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/0",
 		},
 		{
 			description: "scaleSet should not get instance for non-exist nodes",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "agente6c2000005",
 			expectError: true,
@@ -262,7 +270,7 @@ func TestGetZoneByNodeName(t *testing.T) {
 	}{
 		{
 			description: "scaleSet should get faultDomain for non-zoned nodes",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "vmssee6c2000000",
 			faultDomain: 3,
@@ -270,7 +278,7 @@ func TestGetZoneByNodeName(t *testing.T) {
 		},
 		{
 			description: "scaleSet should get availability zone for zoned nodes",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "vmssee6c2000000",
 			zone:        "2",
@@ -279,7 +287,7 @@ func TestGetZoneByNodeName(t *testing.T) {
 		},
 		{
 			description: "scaleSet should get availability zone in lower cases",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "vmssee6c2000000",
 			location:    "WestUS",
@@ -289,7 +297,7 @@ func TestGetZoneByNodeName(t *testing.T) {
 		},
 		{
 			description: "scaleSet should return error for non-exist nodes",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			faultDomain: 3,
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "agente6c2000005",
@@ -333,14 +341,14 @@ func TestGetIPByNodeName(t *testing.T) {
 	}{
 		{
 			description: "GetIPByNodeName should get node's privateIP and publicIP",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "vmssee6c2000000",
 			expected:    []string{fakePrivateIP, fakePublicIP},
 		},
 		{
 			description: "GetIPByNodeName should return error for non-exist nodes",
-			scaleSet:    "ss",
+			scaleSet:    "vmss",
 			vmList:      []string{"vmssee6c2000000", "vmssee6c2000001"},
 			nodeName:    "agente6c2000005",
 			expectError: true,
