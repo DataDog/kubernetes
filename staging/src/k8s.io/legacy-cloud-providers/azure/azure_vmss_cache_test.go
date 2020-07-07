@@ -91,10 +91,15 @@ func TestVMSSVMCache(t *testing.T) {
 	ss.cloud.VirtualMachineScaleSetsClient = mockVMSSClient
 	ss.cloud.VirtualMachineScaleSetVMsClient = mockVMSSVMClient
 
+	computerNamePrefix := "vmssee6c2"
 	expectedScaleSet := compute.VirtualMachineScaleSet{
 		Name: &vmssName,
 		VirtualMachineScaleSetProperties: &compute.VirtualMachineScaleSetProperties{
-			VirtualMachineProfile: &compute.VirtualMachineScaleSetVMProfile{},
+			VirtualMachineProfile: &compute.VirtualMachineScaleSetVMProfile{
+				OsProfile: &compute.VirtualMachineScaleSetOSProfile{
+					ComputerNamePrefix: &computerNamePrefix,
+				},
+			},
 		},
 	}
 	mockVMSSClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]compute.VirtualMachineScaleSet{expectedScaleSet}, nil).AnyTimes()
@@ -120,7 +125,9 @@ func TestVMSSVMCache(t *testing.T) {
 	assert.NoError(t, err)
 
 	// the VM should be removed from cache after deleteCacheForNode().
-	cached, err := ss.vmssVMCache.Get(vmssVirtualMachinesKey, azcache.CacheReadTypeDefault)
+	cacheKey, cache, err := ss.getVMSSVMCache("rg", vmssName)
+	assert.Nil(t, err)
+	cached, err := cache.Get(cacheKey, azcache.CacheReadTypeDefault)
 	assert.NoError(t, err)
 	cachedVirtualMachines := cached.(*sync.Map)
 	_, ok := cachedVirtualMachines.Load(vmName)
