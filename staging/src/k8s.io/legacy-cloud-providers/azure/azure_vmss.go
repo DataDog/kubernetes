@@ -590,6 +590,7 @@ func (ss *scaleSet) listScaleSetVMs(scaleSetName, resourceGroup string) ([]compu
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
+	klog.Errorf("BENXXX listScaleSetVMs patched called for scaleset=%s", scaleSetName)
 	allVMs, rerr := ss.VirtualMachineScaleSetVMsClient.List(ctx, resourceGroup, scaleSetName, string(compute.InstanceView))
 	if rerr != nil {
 		klog.Errorf("VirtualMachineScaleSetVMsClient.List failed: %v", rerr)
