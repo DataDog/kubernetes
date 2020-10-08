@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -112,6 +113,8 @@ type DaemonSetsController struct {
 	historyStoreSynced cache.InformerSynced
 	// podLister get list/get pods from the shared informers's store
 	podLister corelisters.PodLister
+	// podNodeIndex indexes pods by their nodeName
+	podNodeIndex cache.Indexer
 	// podStoreSynced returns true if the pod store has been synced at least once.
 	// Added as a member to the struct to allow injection for testing.
 	podStoreSynced cache.InformerSynced
@@ -191,6 +194,12 @@ func NewDaemonSetsController(daemonSetInformer appsinformers.DaemonSetInformer, 
 		DeleteFunc: dsc.deletePod,
 	})
 	dsc.podLister = podInformer.Lister()
+
+	// This custom indexer will index pods based on their NodeName which will decrease the amount of pods we need to get in simulate() call.
+	podInformer.Informer().GetIndexer().AddIndexers(cache.Indexers{
+		"nodeName": indexByPodNodeName,
+	})
+	dsc.podNodeIndex = podInformer.Informer().GetIndexer()
 	dsc.podStoreSynced = podInformer.Informer().HasSynced
 
 	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -205,6 +214,18 @@ func NewDaemonSetsController(daemonSetInformer appsinformers.DaemonSetInformer, 
 	dsc.enqueueDaemonSet = dsc.enqueue
 	dsc.enqueueDaemonSetRateLimited = dsc.enqueueRateLimited
 	return dsc, nil
+}
+
+func indexByPodNodeName(obj interface{}) ([]string, error) {
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		return []string{}, nil
+	}
+	// We are only interested in active pods with nodeName set
+	if len(pod.Spec.NodeName) == 0 || pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+		return []string{}, nil
+	}
+	return []string{pod.Spec.NodeName}, nil
 }
 
 func (dsc *DaemonSetsController) deleteDaemonset(obj interface{}) {
@@ -1237,29 +1258,26 @@ func (dsc *DaemonSetsController) simulate(newPod *v1.Pod, node *v1.Node, ds *app
 		})
 	}
 
-	pods := []*v1.Pod{}
-
-	podList, err := dsc.podLister.List(labels.Everything())
+	objects, err := dsc.podNodeIndex.ByIndex("nodeName", node.Name)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, pod := range podList {
-		if pod.Spec.NodeName != node.Name {
-			continue
-		}
-		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
-			continue
-		}
-		// ignore pods that belong to the daemonset when taking into account whether
-		// a daemonset should bind to a node.
-		if metav1.IsControlledBy(pod, ds) {
-			continue
-		}
-		pods = append(pods, pod)
-	}
 
-	nodeInfo := schedulercache.NewNodeInfo(pods...)
+	nodeInfo := schedulercache.NewNodeInfo()
 	nodeInfo.SetNode(node)
+
+	for _, obj := range objects {
+		// Ignore pods that belong to the daemonset when taking into account whether a daemonset should bind to a node.
+		// TODO: replace this with metav1.IsControlledBy() in 1.12
+		pod, ok := obj.(*v1.Pod)
+		if !ok {
+			continue
+		}
+		if isControlledByDaemonSet(pod, ds.GetUID()) {
+			continue
+		}
+		nodeInfo.AddPod(pod)
+	}
 
 	_, reasons, err := Predicates(newPod, nodeInfo)
 	return reasons, nodeInfo, err
@@ -1464,4 +1482,13 @@ func (o podByCreationTimestamp) Less(i, j int) bool {
 		return o[i].Name < o[j].Name
 	}
 	return o[i].CreationTimestamp.Before(&o[j].CreationTimestamp)
+}
+
+func isControlledByDaemonSet(p *v1.Pod, uuid types.UID) bool {
+	for _, ref := range p.OwnerReferences {
+		if ref.Controller != nil && *ref.Controller && ref.UID == uuid {
+			return true
+		}
+	}
+	return false
 }
