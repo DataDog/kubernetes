@@ -1,0 +1,62 @@
+name: Build and Push k8s Release
+
+on:
+  push:
+    # Sequence of patterns matched against refs/heads
+    branches:
+    # Push events on bob test branch
+    - bob/ci
+    tags:
+    # Push events on datadog tags
+    - "*-dd*"
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        include:
+        - platform: linux/arm
+        - platform: linux/amd64
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.15
+    - name: Build
+      env:
+        KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
+      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
+
+  release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+        - platform: linux/arm
+          assets: ["kubernetes-client-linux-arm.tar.gz","kubernetes-node-linux-arm.tar.gz","kubernetes-server-linux-arm.tar.gz"]
+        - platform: linux/amd64
+          assets: ["kubernetes-client-linux-and64.tar.gz","kubernetes-node-linux-and64.tar.gz","kubernetes-server-linux-and64.tar.gz"]
+    steps:
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: ${{ github.ref }}
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset
+      id: upload-release-asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+        asset_path: ./_output/release-tars/${{ matrix.assets }}
+        asset_name: ${{ matrix.assets }}
+        asset_content_type: application/tar+gzip
