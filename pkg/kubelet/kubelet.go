@@ -2082,6 +2082,7 @@ func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 		kl.podManager.UpdatePod(pod)
 
 		sidecarsStatus := status.GetSidecarsStatus(pod)
+		glog.Infof("Pod: %s, status: Present=%v,Ready=%v,ContainersWaiting=%v", format.Pod(pod), sidecarsStatus.SidecarsPresent, sidecarsStatus.SidecarsReady, sidecarsStatus.ContainersWaiting)
 
 		if sidecarsStatus.ContainersWaiting {
 			// if containers aren't running and the sidecars are all ready trigger a sync so that the containers get started
