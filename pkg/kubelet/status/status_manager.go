@@ -699,6 +699,7 @@ func GetSidecarsStatus(pod *v1.Pod) SidecarsStatus {
 		containerStatusesCopy = make([]v1.ContainerStatus, len(pod.Status.ContainerStatuses))
 		copy(containerStatusesCopy, pod.Status.ContainerStatuses)
 	}
+
 	sidecarsStatus := SidecarsStatus{SidecarsPresent: false, SidecarsReady: true, ContainersWaiting: false}
 	for _, container := range pod.Spec.Containers {
 		foundStatus := false
@@ -707,7 +708,7 @@ func GetSidecarsStatus(pod *v1.Pod) SidecarsStatus {
 			isSidecar = true
 			sidecarsStatus.SidecarsPresent = true
 		}
-		for _, status := range pod.Status.ContainerStatuses {
+		for _, status := range containerStatusesCopy {
 			if status.Name == container.Name {
 				foundStatus = true
 				if isSidecar {
