@@ -624,18 +624,21 @@ type SidecarsStatus struct {
 }
 
 // GetSidecarsStatus returns the SidecarsStatus for the given pod
+// We assume the worst: if we are unable to determine the status of all containers we make defensive assumptions that
+// there are sidecars, they are not ready, and that there are non-sidecars waiting. This is to prevent starting non-
+// -sidecars accidentally.
 func GetSidecarsStatus(pod *v1.Pod) SidecarsStatus {
 	var containerStatusesCopy []v1.ContainerStatus
 	if pod == nil {
-		glog.Infof("Pod was nil, returning empty sidecar status")
-		return SidecarsStatus{}
+		glog.Infof("Pod was nil, returning sidecar status that prevents progress")
+		return SidecarsStatus{SidecarsPresent: true, SidecarsReady: false, ContainersWaiting: true}
 	}
 	if pod.Spec.Containers == nil {
-		glog.Infof("Pod Containers was nil, returning empty sidecar status")
-		return SidecarsStatus{}
+		glog.Infof("Pod %s: Containers was nil, returning sidecar status that prevents progress", format.Pod(pod))
+		return SidecarsStatus{SidecarsPresent: true, SidecarsReady: false, ContainersWaiting: true}
 	}
 	if pod.Status.ContainerStatuses == nil {
-		glog.Infof("Pod Container status was nil, doing best effort using spec")
+		glog.Infof("Pod %s: ContainerStatuses was nil, doing best effort using spec", format.Pod(pod))
 	} else {
 		// Make a copy of ContainerStatuses to avoid having the carpet pulled from under our feet
 		containerStatusesCopy = make([]v1.ContainerStatus, len(pod.Status.ContainerStatuses))
@@ -668,9 +671,14 @@ func GetSidecarsStatus(pod *v1.Pod) SidecarsStatus {
 				break
 			}
 		}
-		if !foundStatus && isSidecar {
-			glog.Infof("Pod %s: %s (sidecar): status not found, assuming not ready", format.Pod(pod), container.Name)
-			sidecarsStatus.SidecarsReady = false
+		if !foundStatus {
+			if isSidecar {
+				glog.Infof("Pod %s: %s (sidecar): status not found, assuming not ready", format.Pod(pod), container.Name)
+				sidecarsStatus.SidecarsReady = false
+			} else {
+				glog.Infof("Pod: %s: %s (non-sidecar): status not found, assuming waiting", format.Pod(pod), container.Name)
+				sidecarsStatus.ContainersWaiting = true
+			}
 		}
 	}
 	return sidecarsStatus
