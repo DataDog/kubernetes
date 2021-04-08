@@ -6,6 +6,8 @@ on:
     tags:
     # Push events on datadog tags
     - "*-dd*"
+    branches:
+    - "eric.mountain/k110-harden-sidecars"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,25 +17,34 @@ jobs:
       matrix:
         platform: ["linux/amd64"]
     steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 512
-        swap-size-mb: 1024
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
+#    - name: Maximize build space
+#      uses: easimon/maximize-build-space@master
+#      with:
+#        root-reserve-mb: 512
+#        swap-size-mb: 1024
+#        remove-dotnet: 'true'
+#        remove-android: 'true'
+#        remove-haskell: 'true'
     - name: FreeSpace
       run: |
         echo "Free space:"
         df -h
+    - name: Debug
+      run: |
+        docker info
+        docker version
+        systemctl cat docker
+#    - name: Stop here
+#      run: |
+#        echo stopping
+#        false
     - uses: actions/checkout@v2
       with:
         fetch-depth: 0
-    - name: Set up Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.15
+#    - name: Set up Go
+#      uses: actions/setup-go@v2
+#      with:
+#        go-version: 1.15
     - name: Build recent
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
