@@ -71,7 +71,6 @@ import (
 	utilnode "k8s.io/kubernetes/pkg/util/node"
 	"k8s.io/kubernetes/pkg/util/oom"
 	utilpointer "k8s.io/kubernetes/pkg/util/pointer"
-	"k8s.io/kubernetes/pkg/util/resourcecontainer"
 	"k8s.io/kubernetes/pkg/version"
 	"k8s.io/kubernetes/pkg/version/verflag"
 	"k8s.io/utils/exec"
@@ -470,12 +469,7 @@ func (s *ProxyServer) Run() error {
 	}
 
 	if len(s.ResourceContainer) != 0 {
-		// Run in its own container.
-		if err := resourcecontainer.RunInResourceContainer(s.ResourceContainer); err != nil {
-			glog.Warningf("Failed to start in resource-only container %q: %v", s.ResourceContainer, err)
-		} else {
-			glog.V(2).Infof("Running in resource-only container %q", s.ResourceContainer)
-		}
+		glog.Warningf("Explicitly ignoring ResourceContainer (%q)", s.ResourceContainer)
 	}
 
 	if s.Broadcaster != nil && s.EventClient != nil {
