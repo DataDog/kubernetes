@@ -638,15 +638,6 @@ func ParsePodFullName(podFullName string) (string, string, error) {
 // completely optional settings.
 type Option func(Runtime)
 
-// SortContainerStatusesByCreationTime sorts the container statuses by creation time.
-type SortContainerStatusesByCreationTime []*Status
-
-func (s SortContainerStatusesByCreationTime) Len() int      { return len(s) }
-func (s SortContainerStatusesByCreationTime) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-func (s SortContainerStatusesByCreationTime) Less(i, j int) bool {
-	return s[i].CreatedAt.Before(s[j].CreatedAt)
-}
-
 const (
 	// MaxPodTerminationMessageLogLength is the maximum bytes any one pod may have written
 	// as termination message output across all containers. Containers will be evenly truncated

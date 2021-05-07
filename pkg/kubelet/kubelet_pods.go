@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -1659,6 +1660,27 @@ func (kl *Kubelet) convertStatusToAPIStatus(pod *v1.Pod, podStatus *kubecontaine
 	return &apiPodStatus
 }
 
+type timeContainerStatePair struct {
+	time           time.Time
+	containerState v1.ContainerState
+}
+
+// insertSortedTime inserts in a slice from the latest timestamp to the earliest timestamp
+// it keeps a maximum of 3 elements
+func insertSortedTime(slice []timeContainerStatePair, newElement timeContainerStatePair) []timeContainerStatePair {
+	// Insert the tuple in the sorted slice
+	i := sort.Search(len(slice), func(i int) bool { return slice[i].time.Before(newElement.time) })
+	slice = append(slice, timeContainerStatePair{})
+	copy(slice[i+1:], slice[i:])
+	slice[i] = newElement
+
+	// Only keep the first 3 elements
+	if len(slice) > 3 {
+		return slice[:3]
+	}
+	return slice
+}
+
 // convertToAPIContainerStatuses converts the given internal container
 // statuses into API container statuses.
 func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecontainer.PodStatus, previousStatus []v1.ContainerStatus, containers []v1.Container, hasInitContainers, isInitContainer bool) []v1.ContainerStatus {
@@ -1818,17 +1840,12 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 		statuses[container.Name] = status
 	}
 
-	// Make the latest container status comes first.
-	sort.Sort(sort.Reverse(kubecontainer.SortContainerStatusesByCreationTime(podStatus.ContainerStatuses)))
 	// Set container statuses according to the statuses seen in pod status
-	containerSeen := map[string]int{}
+	containerCreationTimeSlice := map[string][]timeContainerStatePair{}
 	for _, cStatus := range podStatus.ContainerStatuses {
 		cName := cStatus.Name
 		if _, ok := statuses[cName]; !ok {
 			// This would also ignore the infra container.
-			continue
-		}
-		if containerSeen[cName] >= 2 {
 			continue
 		}
 		var oldStatusPtr *v1.ContainerStatus
@@ -1836,12 +1853,19 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 			oldStatusPtr = &oldStatus
 		}
 		status := convertContainerStatus(cStatus, oldStatusPtr)
-		if containerSeen[cName] == 0 {
+
+		containerCreationTimeSlice[cName] = insertSortedTime(containerCreationTimeSlice[cName], timeContainerStatePair{
+			cStatus.CreatedAt,
+			status.State,
+		},
+		)
+
+		// If the container status has the latest creation time
+		if cStatus.CreatedAt == containerCreationTimeSlice[cName][0].time {
 			statuses[cName] = status
-		} else {
-			statuses[cName].LastTerminationState = status.State
 		}
-		containerSeen[cName] = containerSeen[cName] + 1
+		lastElementIndex := len(containerCreationTimeSlice[cName]) - 1
+		statuses[cName].LastTerminationState = containerCreationTimeSlice[cName][lastElementIndex].containerState
 	}
 
 	// Handle the containers failed to be started, which should be in Waiting state.
