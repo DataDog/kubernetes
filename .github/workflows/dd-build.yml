@@ -15,6 +15,18 @@ jobs:
       matrix:
         platform: ["linux/amd64"]
     steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 512
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+    - name: FreeSpace
+      run: |
+        echo "Free space:"
+        df -h
     - uses: actions/checkout@v2
       with:
         fetch-depth: 0
