@@ -257,8 +257,9 @@ func (p *staticPolicy) RemoveContainer(s state.State, podUID string, containerNa
 func (p *staticPolicy) allocateCPUs(s state.State, numCPUs int, numaAffinity bitmask.BitMask, reusableCPUs cpuset.CPUSet) (cpuset.CPUSet, error) {
 	klog.Infof("[cpumanager] allocateCpus: (numCPUs: %d, socket: %v)", numCPUs, numaAffinity)
 
-	assignableCPUs := p.assignableCPUs(s).Union(reusableCPUs)
+	assignableCPUs := reusableCPUs.Union(p.assignableCPUs(s))
 
+	klog.Infof("[cpumanager] allocateCpus: (assignable: %v, reusable: %v)", assignableCPUs, reusableCPUs)
 	// If there are aligned CPUs in numaAffinity, attempt to take those first.
 	result := cpuset.NewCPUSet()
 	if numaAffinity != nil {
@@ -278,6 +279,7 @@ func (p *staticPolicy) allocateCPUs(s state.State, numCPUs int, numaAffinity bit
 		}
 
 		result = result.Union(alignedCPUs)
+		klog.Infof("[cpumanager] allocateCpus: (numaAligned: %v, reusable: %v)", alignedCPUs, reusableCPUs)
 	}
 
 	// Get any remaining CPUs from what's leftover after attempting to grab aligned ones.

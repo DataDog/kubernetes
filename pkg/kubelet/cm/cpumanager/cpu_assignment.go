@@ -174,7 +174,10 @@ func takeByTopology(topo *topology.CPUTopology, availableCPUs cpuset.CPUSet, num
 	// 2. Acquire whole cores, if available and the container requires at least
 	//    a core's-worth of CPUs.
 	if acc.needs(acc.topo.CPUsPerCore()) {
-		for _, c := range acc.freeCores() {
+		freeCores := acc.freeCores()
+		for _, c := range freeCores {
+			klog.V(4).Infof("[cpumanager] takeByTopology: availlables %v", availableCPUs)
+			klog.V(4).Infof("[cpumanager] takeByTopology: freecores %v", freeCores)
 			klog.V(4).Infof("[cpumanager] takeByTopology: claiming core [%d]", c)
 			acc.take(acc.details.CPUsInCores(c))
 			if acc.isSatisfied() {
@@ -189,7 +192,10 @@ func takeByTopology(topo *topology.CPUTopology, availableCPUs cpuset.CPUSet, num
 	// 3. Acquire single threads, preferring to fill partially-allocated cores
 	//    on the same sockets as the whole cores we have already taken in this
 	//    allocation.
-	for _, c := range acc.freeCPUs() {
+	freeCPU := acc.freeCPUs()
+	for _, c := range freeCPU {
+		klog.V(4).Infof("[cpumanager] takeByTopology: availlables %v", availableCPUs)
+		klog.V(4).Infof("[cpumanager] takeByTopology: freecpu %v", freeCPU)
 		klog.V(4).Infof("[cpumanager] takeByTopology: claiming CPU [%d]", c)
 		if acc.needs(1) {
 			acc.take(cpuset.NewCPUSet(c))
