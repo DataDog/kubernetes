@@ -18,6 +18,7 @@ package cpumanager
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"reflect"
 	"strconv"
 	"strings"
@@ -163,7 +164,7 @@ func makeMultiContainerPod(initCPUs, appCPUs []struct{ request, limit string }) 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pod",
-			UID:  "podUID",
+			UID:  uuid.NewUUID(),
 		},
 		Spec: v1.PodSpec{
 			InitContainers: []v1.Container{},
@@ -508,7 +509,7 @@ func TestCPUManagerAddWithInitContainers(t *testing.T) {
 			testCase.expInitCSets,
 			testCase.expCSets...)
 
-		cumCSet := cpuset.NewCPUSet()
+		appCtrCumCSet := cpuset.NewCPUSet()
 
 		for i := range containers {
 			err := mgr.Allocate(testCase.pod, &containers[i])
@@ -533,13 +534,154 @@ func TestCPUManagerAddWithInitContainers(t *testing.T) {
 					testCase.description, expCSets[i], containers[i].Name, cset)
 			}
 
-			cumCSet = cumCSet.Union(cset)
+			if strings.HasPrefix(containers[i].Name, "appContainer-") {
+				appCtrCumCSet = appCtrCumCSet.Union(cset)
+			}
+		}
+		// Verify if all init container CPUs are either reused or released back to the original pool.
+		// The final state of state.defaultCPUSet should only exclude CPUs used for app containers.
+		if !testCase.stDefaultCPUSet.Difference(appCtrCumCSet).Equals(state.defaultCPUSet) {
+			t.Errorf("StaticPolicy error (%v). expected final state for defaultCPUSet %v but got %v",
+				testCase.description, testCase.stDefaultCPUSet.Difference(appCtrCumCSet), state.defaultCPUSet)
+		}
+	}
+}
+
+func TestCPUManagerAddWithMultiplePods(t *testing.T) {
+	testCases := []struct {
+		description      string
+		topo             *topology.CPUTopology
+		numReservedCPUs  int
+		initContainerIDs [][]string
+		containerIDs     [][]string
+		stAssignments    state.ContainerCPUAssignments
+		stDefaultCPUSet  cpuset.CPUSet
+		pod              []*v1.Pod
+		expInitCSets     [][]cpuset.CPUSet
+		expCSets         [][]cpuset.CPUSet
+	}{
+		{
+			description:     "Multi Init, Multi App Container Split CPUs",
+			topo:            topoSingleSocketHT,
+			numReservedCPUs: 0,
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7),
+			initContainerIDs: [][]string{
+				{"initFakeID-1", "initFakeID-2"},
+				{"initFakeID-1"},
+			},
+			containerIDs: [][]string{
+				{"appFakeID-1", "appFakeID-2"},
+				{"appFakeID-1"},
+			},
+			pod: []*v1.Pod{
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{
+						{"2000m", "2000m"},
+						{"4000m", "4000m"},
+					},
+					[]struct{ request, limit string }{
+						{"3000m", "3000m"},
+						{"2000m", "2000m"},
+					}),
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{
+						{"3000m", "3000m"},
+					},
+					[]struct{ request, limit string }{
+						{"3000m", "3000m"},
+					}),
+			},
+			expInitCSets: [][]cpuset.CPUSet{
+				{
+					cpuset.NewCPUSet(0, 4),
+					cpuset.NewCPUSet(0, 4, 1, 5),
+				},
+				{
+					cpuset.NewCPUSet(3, 5, 7),
+				},
+			},
+			expCSets: [][]cpuset.CPUSet{
+				{
+					cpuset.NewCPUSet(0, 1, 4),
+					cpuset.NewCPUSet(2, 6),
+				},
+				{
+					cpuset.NewCPUSet(3, 5, 7),
+				},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		policy, _ := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, cpuset.NewCPUSet(), topologymanager.NewFakeManager())
+
+		state := &mockState{
+			assignments:   testCase.stAssignments,
+			defaultCPUSet: testCase.stDefaultCPUSet,
 		}
 
-		if !testCase.stDefaultCPUSet.Difference(cumCSet).Equals(state.defaultCPUSet) {
-			t.Errorf("StaticPolicy error (%v). expected final state for defaultCPUSet %v but got %v",
-				testCase.description, testCase.stDefaultCPUSet.Difference(cumCSet), state.defaultCPUSet)
+		mgr := &manager{
+			policy:            policy,
+			state:             state,
+			containerRuntime:  mockRuntimeService{},
+			containerMap:      containermap.NewContainerMap(),
+			podStatusProvider: mockPodStatusProvider{},
+			sourcesReady:      &sourcesReadyStub{},
+			activePods: func() []*v1.Pod {
+				return testCase.pod
+			},
 		}
+		appCtrCumCSet := cpuset.NewCPUSet()
+
+		for ix, pod := range testCase.pod {
+			containers := append(
+				pod.Spec.InitContainers,
+				pod.Spec.Containers...)
+
+			containerIDs := append(
+				testCase.initContainerIDs[ix],
+				testCase.containerIDs[ix]...)
+
+			expCSets := append(
+				testCase.expInitCSets[ix],
+				testCase.expCSets[ix]...)
+
+			for i := range containers {
+				err := mgr.Allocate(pod, &containers[i])
+				if err != nil {
+					t.Errorf("StaticPolicy Allocate() error (%v). unexpected error for container id: %v: %v",
+						testCase.description, containerIDs[i], err)
+				}
+				err = mgr.AddContainer(pod, &containers[i], containerIDs[i])
+				if err != nil {
+					t.Errorf("StaticPolicy AddContainer() error (%v). unexpected error for container id: %v: %v",
+						testCase.description, containerIDs[i], err)
+				}
+
+				cset, found := state.assignments[string(pod.UID)][containers[i].Name]
+				if !expCSets[i].IsEmpty() && !found {
+					t.Errorf("StaticPolicy AddContainer() error (%v). expected container %v to be present in assignments %v",
+						testCase.description, containers[i].Name, state.assignments)
+				}
+
+				if found && !cset.Equals(expCSets[i]) {
+					t.Errorf("StaticPolicy AddContainer() error (%v). expected cpuset %v for container %v but got %v",
+						testCase.description, expCSets[i], containers[i].Name, cset)
+				}
+
+				if strings.HasPrefix(containers[i].Name, "appContainer-") {
+					appCtrCumCSet = appCtrCumCSet.Union(cset)
+				}
+			}
+			// Verify if all init container CPUs are either reused or released back to the original pool.
+			// The final state of state.defaultCPUSet should only exclude CPUs used for app containers.
+			if !testCase.stDefaultCPUSet.Difference(appCtrCumCSet).Equals(state.defaultCPUSet) {
+				t.Errorf("StaticPolicy error (%v). expected final state for defaultCPUSet %v but got %v",
+					testCase.description, testCase.stDefaultCPUSet.Difference(appCtrCumCSet), state.defaultCPUSet)
+			}
+		}
+
 	}
 }
 

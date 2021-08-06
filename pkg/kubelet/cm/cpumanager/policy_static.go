@@ -192,12 +192,6 @@ func (p *staticPolicy) assignableCPUs(s state.State) cpuset.CPUSet {
 }
 
 func (p *staticPolicy) updateCPUsToReuse(pod *v1.Pod, container *v1.Container, cset cpuset.CPUSet) {
-	// If pod entries to m.cpusToReuse other than the current pod exist, delete them.
-	for podUID := range p.cpusToReuse {
-		if podUID != string(pod.UID) {
-			delete(p.cpusToReuse, podUID)
-		}
-	}
 	// If no cpuset exists for cpusToReuse by this pod yet, create one.
 	if _, ok := p.cpusToReuse[string(pod.UID)]; !ok {
 		p.cpusToReuse[string(pod.UID)] = cpuset.NewCPUSet()
@@ -238,7 +232,16 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 		}
 		s.SetCPUSet(string(pod.UID), container.Name, cpuset)
 		p.updateCPUsToReuse(pod, container, cpuset)
+		// If the recently allocated CPU is for the last app container in the pod, release CPUs that are not re-used
+		// back to the default CPU set.
+		if container.Name == pod.Spec.Containers[len(pod.Spec.Containers)-1].Name{
+			cpusToReturn, ok := p.cpusToReuse[string(pod.UID)]
+			if  ok && ! cpusToReturn.IsEmpty(){
+				s.SetDefaultCPUSet(s.GetDefaultCPUSet().Union(cpusToReturn))
+				delete(p.cpusToReuse, string(pod.UID))
+			}
 
+		}
 	}
 	// container belongs in the shared pool (nothing to do; use default cpuset)
 	return nil
