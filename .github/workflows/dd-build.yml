@@ -16,15 +16,11 @@ jobs:
     - uses: actions/checkout@v2
       with:
         fetch-depth: 0
-    - name: Set up Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.15
     - name: Build
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
         KUBE_RELEASE_RUN_TESTS: n
-      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
+      run: ./build/run.sh make hyperkube KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
     - uses: actions/upload-artifact@v2
       with:
         name: k8s_output
