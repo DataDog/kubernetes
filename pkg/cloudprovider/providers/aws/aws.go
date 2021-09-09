@@ -46,7 +46,7 @@ import (
 	"gopkg.in/gcfg.v1"
 	"k8s.io/klog"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -279,6 +279,9 @@ type Services interface {
 type EC2 interface {
 	// Query EC2 for instances matching the filter
 	DescribeInstances(request *ec2.DescribeInstancesInput) ([]*ec2.Instance, error)
+
+	// Query EC2 for instances matching the filter with pagination
+	DescribeInstancesPages(input *ec2.DescribeInstancesInput, fn func(*ec2.DescribeInstancesOutput, bool) bool) error
 
 	// Attach a volume to an instance
 	AttachVolume(*ec2.AttachVolumeInput) (*ec2.VolumeAttachment, error)
@@ -900,6 +903,11 @@ func (s *awsSdkEC2) DescribeInstances(request *ec2.DescribeInstancesInput) ([]*e
 	timeTaken := time.Since(requestTime).Seconds()
 	recordAWSMetric("describe_instance", timeTaken, nil)
 	return results, nil
+}
+
+// Implementation of EC2.Instances with pagination
+func (s *awsSdkEC2) DescribeInstancesPages(input *ec2.DescribeInstancesInput, fn func(*ec2.DescribeInstancesOutput, bool) bool) error {
+	return s.ec2.DescribeInstancesPages(input, fn)
 }
 
 // Implements EC2.DescribeSecurityGroups
@@ -4503,17 +4511,21 @@ func (c *Cloud) describeInstances(filters []*ec2.Filter) ([]*ec2.Instance, error
 		Filters: filters,
 	}
 
-	response, err := c.ec2.DescribeInstances(request)
+	var matches []*ec2.Instance
+	err := c.ec2.DescribeInstancesPages(request, func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
+		for _, reservations := range page.Reservations {
+			for _, instance := range reservations.Instances {
+				if c.tagging.hasClusterTag(instance.Tags) {
+					matches = append(matches, instance)
+				}
+			}
+		}
+		return !lastPage
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	var matches []*ec2.Instance
-	for _, instance := range response {
-		if c.tagging.hasClusterTag(instance.Tags) {
-			matches = append(matches, instance)
-		}
-	}
 	return matches, nil
 }
 
