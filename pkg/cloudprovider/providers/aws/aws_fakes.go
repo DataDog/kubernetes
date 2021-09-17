@@ -174,6 +174,11 @@ func (ec2i *FakeEC2Impl) DescribeInstances(request *ec2.DescribeInstancesInput) 
 	return matches, nil
 }
 
+// DescribeInstancesPages is not implemented but is required for interface conformance
+func (ec2i *FakeEC2Impl) DescribeInstancesPages(input *ec2.DescribeInstancesInput, fn func(*ec2.DescribeInstancesOutput, bool) bool) error {
+	panic("Not implemented")
+}
+
 // AttachVolume is not implemented but is required for interface conformance
 func (ec2i *FakeEC2Impl) AttachVolume(request *ec2.AttachVolumeInput) (resp *ec2.VolumeAttachment, err error) {
 	panic("Not implemented")
