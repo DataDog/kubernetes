@@ -29,7 +29,6 @@ ENV KUBE_CROSSPLATFORMS \
   linux/arm linux/arm64 \
   linux/ppc64le \
   linux/s390x \
-  darwin/amd64 darwin/386 \
   windows/amd64 windows/386
 
 # Pre-compile the standard go library when cross-compiling. This is much easier now when we have go1.5+

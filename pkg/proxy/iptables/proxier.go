@@ -420,7 +420,7 @@ func CleanupLeftovers(ipt utiliptables.Interface) (encounteredError bool) {
 		// Write it.
 		err = ipt.Restore(utiliptables.TableNAT, natLines, utiliptables.NoFlushTables, utiliptables.RestoreCounters)
 		if err != nil {
-			glog.Errorf("Failed to execute iptables-restore for %s: %v", utiliptables.TableNAT, err)
+			glog.Errorf("Failed to execute iptables-restore for %s: %v %s", utiliptables.TableNAT, err, string(natLines))
 			encounteredError = true
 		}
 	}

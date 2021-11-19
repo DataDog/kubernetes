@@ -592,6 +592,7 @@ func (proxier *Proxier) Sync() {
 func (proxier *Proxier) SyncLoop() {
 	// Update healthz timestamp at beginning in case Sync() never succeeds.
 	if proxier.healthzServer != nil {
+		glog.Info("[healthcheck] updating timestamp")
 		proxier.healthzServer.UpdateTimestamp()
 	}
 	proxier.syncRunner.Loop(wait.NeverStop)
@@ -782,8 +783,10 @@ func (proxier *Proxier) syncProxyRules() {
 		glog.Errorf("error listing addresses bound to dummy interface, error: %v", err)
 	}
 
+	glog.V(5).Info("Before Building IPVS Rules")
 	// Build IPVS rules for each service.
 	for svcName, svc := range proxier.serviceMap {
+		glog.V(5).Infof("Building IPVS Rules: %s", svcName)
 		svcInfo, ok := svc.(*serviceInfo)
 		if !ok {
 			glog.Errorf("Failed to cast serviceInfo %q", svcName.String())
@@ -1151,23 +1154,30 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 	}
 
+	glog.V(5).Info("Before Sync IpSets entries")
 	// sync ipset entries
 	for _, set := range proxier.ipsetList {
 		set.syncIPSetEntries()
 	}
+	glog.V(5).Info("Sync IpSets entries")
 
 	// Tail call iptables rules for ipset, make sure only call iptables once
 	// in a single loop per ip set.
 	proxier.writeIptablesRules()
+	glog.V(5).Info("Wrote iptables rules")
 
 	// Sync iptables rules.
 	// NOTE: NoFlushTables is used so we don't flush non-kubernetes chains in the table.
 	proxier.iptablesData.Reset()
+	glog.V(5).Info("Reset iptables rules")
 	proxier.iptablesData.Write(proxier.natChains.Bytes())
+	glog.V(5).Info("Wrote iptables natChains")
 	proxier.iptablesData.Write(proxier.natRules.Bytes())
+	glog.V(5).Info("Wrote iptables natRules")
 
 	glog.V(5).Infof("Restoring iptables rules: %s", proxier.iptablesData.Bytes())
 	err = proxier.iptables.RestoreAll(proxier.iptablesData.Bytes(), utiliptables.NoFlushTables, utiliptables.RestoreCounters)
+	glog.V(5).Info("Restored iptables natRules")
 	if err != nil {
 		glog.Errorf("Failed to execute iptables-restore: %v\nRules:\n%s", err, proxier.iptablesData.Bytes())
 		// Revert new local ports.
@@ -1196,6 +1206,7 @@ func (proxier *Proxier) syncProxyRules() {
 
 	// Update healthz timestamp
 	if proxier.healthzServer != nil {
+		glog.Info("[healthcheck] updating timestamp")
 		proxier.healthzServer.UpdateTimestamp()
 	}
 

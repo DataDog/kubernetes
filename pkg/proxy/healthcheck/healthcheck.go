@@ -339,6 +339,7 @@ func (h healthzHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 	resp.Header().Set("Content-Type", "application/json")
 	if !lastUpdated.IsZero() && currentTime.After(lastUpdated.Add(h.hs.healthTimeout)) {
+		glog.Errorf("Healthz fails because lastUpdatedIsZero: %v - tooLate: %t - healthTimeout %s - lastUpdated %q - currentTime %q", lastUpdated.IsZero(),currentTime.After(lastUpdated.Add(h.hs.healthTimeout)),h.hs.healthTimeout.String(),lastUpdated,currentTime)
 		resp.WriteHeader(http.StatusServiceUnavailable)
 	} else {
 		resp.WriteHeader(http.StatusOK)

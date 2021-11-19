@@ -23,16 +23,6 @@ readonly KUBE_GOPATH="${KUBE_OUTPUT}/go"
 kube::golang::server_targets() {
   local targets=(
     cmd/kube-proxy
-    cmd/kube-apiserver
-    cmd/kube-controller-manager
-    cmd/cloud-controller-manager
-    cmd/kubelet
-    cmd/kubeadm
-    cmd/hyperkube
-    cmd/kube-scheduler
-    vendor/k8s.io/kube-aggregator
-    vendor/k8s.io/apiextensions-apiserver
-    cluster/gce/gci/mounter
   )
   echo "${targets[@]}"
 }
@@ -46,8 +36,6 @@ readonly KUBE_SERVER_BINARIES=("${KUBE_SERVER_TARGETS[@]##*/}")
 kube::golang::node_targets() {
   local targets=(
     cmd/kube-proxy
-    cmd/kubeadm
-    cmd/kubelet
   )
   echo "${targets[@]}"
 }
@@ -71,11 +59,9 @@ elif [[ "${KUBE_FASTBUILD:-}" == "true" ]]; then
   readonly KUBE_NODE_PLATFORMS=(linux/amd64)
   if [[ "${KUBE_BUILDER_OS:-}" == "darwin"* ]]; then
     readonly KUBE_TEST_PLATFORMS=(
-      darwin/amd64
       linux/amd64
     )
     readonly KUBE_CLIENT_PLATFORMS=(
-      darwin/amd64
       linux/amd64
     )
   else
@@ -111,8 +97,6 @@ else
     linux/arm64
     linux/s390x
     linux/ppc64le
-    darwin/amd64
-    darwin/386
     windows/amd64
     windows/386
   )
@@ -124,7 +108,6 @@ else
     linux/arm64
     linux/s390x
     linux/ppc64le
-    darwin/amd64
     windows/amd64
   )
 fi
@@ -147,8 +130,6 @@ kube::golang::test_targets() {
     cmd/genyaml
     cmd/genswaggertypedocs
     cmd/linkcheck
-    vendor/github.com/onsi/ginkgo/ginkgo
-    test/e2e/e2e.test
   )
   echo "${targets[@]}"
 }
