@@ -90,6 +90,7 @@ func TestStatefulSetControl(t *testing.T) {
 		{UpdatePodFailure, simpleSetFn},
 		{UpdateSetStatusFailure, simpleSetFn},
 		{PodRecreateDeleteFailure, simpleSetFn},
+		{RecreatesPVCForPendingPod, simpleSetFn},
 	}
 
 	for _, testCase := range testCases {
@@ -440,6 +441,58 @@ func PodRecreateDeleteFailure(t *testing.T, set *apps.StatefulSet, invariants in
 	}
 	if isCreated(pods[0]) {
 		t.Error("StatefulSet did not recreate failed Pod")
+	}
+}
+
+func RecreatesPVCForPendingPod(t *testing.T, set *apps.StatefulSet, invariants invariantFunc) {
+	client := fake.NewSimpleClientset()
+	spc, _, ssc, stop := setupController(client)
+	defer close(stop)
+	selector, err := metav1.LabelSelectorAsSelector(set.Spec.Selector)
+	if err != nil {
+		t.Error(err)
+	}
+	pods, err := spc.podsLister.Pods(set.Namespace).List(selector)
+	if err != nil {
+		t.Error(err)
+	}
+	if err := ssc.UpdateStatefulSet(set, pods); err != nil {
+		t.Errorf("Error updating StatefulSet %s", err)
+	}
+	if err := invariants(set, spc); err != nil {
+		t.Error(err)
+	}
+	pods, err = spc.podsLister.Pods(set.Namespace).List(selector)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, claim := range getPersistentVolumeClaims(set, pods[0]) {
+		spc.claimsIndexer.Delete(&claim)
+	}
+	pods[0].Status.Phase = v1.PodPending
+	oldCreationTimestamp := pods[0].CreationTimestamp
+	pods[0].CreationTimestamp = metav1.Now()
+	spc.podsIndexer.Update(pods[0])
+	if err := ssc.UpdateStatefulSet(set, pods); err != nil {
+		t.Errorf("Error updating StatefulSet %s", err)
+	}
+	// The pod is still new, so the pvc should not be recreated yet
+	if err := invariants(set, spc); err == nil {
+		t.Error("Statefulset pod should be missing pvc")
+	}
+
+	pods[0].CreationTimestamp = oldCreationTimestamp
+	spc.podsIndexer.Update(pods[0])
+	if err := ssc.UpdateStatefulSet(set, pods); err != nil {
+		t.Errorf("Error updating StatefulSet %s", err)
+	}
+	// invariants check if there any missing PVCs for the Pods
+	if err := invariants(set, spc); err != nil {
+		t.Error(err)
+	}
+	pods, err = spc.podsLister.Pods(set.Namespace).List(selector)
+	if err != nil {
+		t.Error(err)
 	}
 }
 
@@ -1764,6 +1817,13 @@ func (spc *fakeStatefulPodControl) DeleteStatefulPod(set *apps.StatefulSet, pod 
 		spc.podsIndexer.Delete(obj)
 	}
 
+	return nil
+}
+
+func (spc *fakeStatefulPodControl) CreatePersistentVolumeClaims(set *apps.StatefulSet, pod *v1.Pod) error {
+	for _, claim := range getPersistentVolumeClaims(set, pod) {
+		spc.claimsIndexer.Update(&claim)
+	}
 	return nil
 }
 

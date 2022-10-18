@@ -426,6 +426,18 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 			// pod created, no more work possible for this round
 			continue
 		}
+
+		// If the Pod is stuck in pending state then trigger PVC creation to create missing PVCs
+		if isStuckPending(replicas[i]) {
+			klog.V(4).Infof(
+				"StatefulSet %s/%s is triggering PVC creation for pending Pod %s",
+				set.Namespace,
+				set.Name,
+				replicas[i].Name)
+			if err := ssc.podControl.CreatePersistentVolumeClaims(set, replicas[i]); err != nil {
+				return &status, err
+			}
+		}
 		// If we find a Pod that is currently terminating, we must wait until graceful deletion
 		// completes before we continue to make progress.
 		if isTerminating(replicas[i]) && monotonic {

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"time"
 
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
@@ -33,6 +34,8 @@ import (
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/controller/history"
 )
+
+const pendingPodDelay = 30 * time.Second
 
 var patchCodec = scheme.Codecs.LegacyCodec(apps.SchemeGroupVersion)
 
@@ -207,6 +210,11 @@ func isRunningAndReady(pod *v1.Pod) bool {
 // isCreated returns true if pod has been created and is maintained by the API server
 func isCreated(pod *v1.Pod) bool {
 	return pod.Status.Phase != ""
+}
+
+// isStuckPending returns true if pod has a Phase of PodPending and has been pending for pendingPodDelay time to ignore transient pending pods
+func isStuckPending(pod *v1.Pod) bool {
+	return pod.Status.Phase == v1.PodPending && time.Now().Sub(pod.CreationTimestamp.Time) > pendingPodDelay
 }
 
 // isFailed returns true if pod has a Phase of PodFailed
