@@ -35,8 +35,6 @@ import (
 	"k8s.io/kubernetes/pkg/controller/history"
 )
 
-const pendingPodDelay = 30 * time.Second
-
 var patchCodec = scheme.Codecs.LegacyCodec(apps.SchemeGroupVersion)
 
 // overlappingStatefulSets sorts a list of StatefulSets by creation timestamp, using their names as a tie breaker.
@@ -212,9 +210,9 @@ func isCreated(pod *v1.Pod) bool {
 	return pod.Status.Phase != ""
 }
 
-// isStuckPending returns true if pod has a Phase of PodPending and has been pending for pendingPodDelay time to ignore transient pending pods
-func isStuckPending(pod *v1.Pod) bool {
-	return pod.Status.Phase == v1.PodPending && time.Now().Sub(pod.CreationTimestamp.Time) > pendingPodDelay
+// isPending returns true if pod has a Phase of PodPending
+func isPending(pod *v1.Pod) bool {
+	return pod.Status.Phase == v1.PodPending
 }
 
 // isFailed returns true if pod has a Phase of PodFailed

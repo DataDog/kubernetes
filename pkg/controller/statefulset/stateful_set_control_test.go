@@ -470,18 +470,6 @@ func RecreatesPVCForPendingPod(t *testing.T, set *apps.StatefulSet, invariants i
 		spc.claimsIndexer.Delete(&claim)
 	}
 	pods[0].Status.Phase = v1.PodPending
-	oldCreationTimestamp := pods[0].CreationTimestamp
-	pods[0].CreationTimestamp = metav1.Now()
-	spc.podsIndexer.Update(pods[0])
-	if err := ssc.UpdateStatefulSet(set, pods); err != nil {
-		t.Errorf("Error updating StatefulSet %s", err)
-	}
-	// The pod is still new, so the pvc should not be recreated yet
-	if err := invariants(set, spc); err == nil {
-		t.Error("Statefulset pod should be missing pvc")
-	}
-
-	pods[0].CreationTimestamp = oldCreationTimestamp
 	spc.podsIndexer.Update(pods[0])
 	if err := ssc.UpdateStatefulSet(set, pods); err != nil {
 		t.Errorf("Error updating StatefulSet %s", err)

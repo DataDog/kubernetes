@@ -427,8 +427,8 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 			continue
 		}
 
-		// If the Pod is stuck in pending state then trigger PVC creation to create missing PVCs
-		if isStuckPending(replicas[i]) {
+		// If the Pod is in pending state then trigger PVC creation to create missing PVCs
+		if isPending(replicas[i]) {
 			klog.V(4).Infof(
 				"StatefulSet %s/%s is triggering PVC creation for pending Pod %s",
 				set.Namespace,
