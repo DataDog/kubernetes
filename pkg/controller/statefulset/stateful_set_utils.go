@@ -22,10 +22,9 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"time"
 
 	apps "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -78,7 +77,7 @@ func getParentName(pod *v1.Pod) string {
 	return parent
 }
 
-//  getOrdinal gets pod's ordinal. If pod has no ordinal, -1 is returned.
+// getOrdinal gets pod's ordinal. If pod has no ordinal, -1 is returned.
 func getOrdinal(pod *v1.Pod) int {
 	_, ordinal := getParentNameAndOrdinal(pod)
 	return ordinal
