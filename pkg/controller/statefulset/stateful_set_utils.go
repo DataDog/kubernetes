@@ -24,7 +24,7 @@ import (
 	"strconv"
 
 	apps "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -77,7 +77,7 @@ func getParentName(pod *v1.Pod) string {
 	return parent
 }
 
-//  getOrdinal gets pod's ordinal. If pod has no ordinal, -1 is returned.
+// getOrdinal gets pod's ordinal. If pod has no ordinal, -1 is returned.
 func getOrdinal(pod *v1.Pod) int {
 	_, ordinal := getParentNameAndOrdinal(pod)
 	return ordinal
@@ -207,6 +207,11 @@ func isRunningAndReady(pod *v1.Pod) bool {
 // isCreated returns true if pod has been created and is maintained by the API server
 func isCreated(pod *v1.Pod) bool {
 	return pod.Status.Phase != ""
+}
+
+// isPending returns true if pod has a Phase of PodPending
+func isPending(pod *v1.Pod) bool {
+	return pod.Status.Phase == v1.PodPending
 }
 
 // isFailed returns true if pod has a Phase of PodFailed
