@@ -14,10 +14,10 @@ jobs:
         platform: ["linux/arm64","linux/amd64"]
     steps:
     - uses: actions/checkout@v3
-#    - name: Set up Go
-#      uses: actions/setup-go@v2
-#      with:
-#        go-version: 1.15
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.15
     - name: Setup Docker buildx
       uses: docker/setup-buildx-action@v2
     - name: Build pause container image
@@ -39,11 +39,11 @@ jobs:
         docker save -o _output/release-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
         echo docker save done
         gzip _output/release-tars/pause-3.6-${TARGET_PLATFORM}.tar
-#    - name: Build
-#      env:
-#        KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
-#        KUBE_RELEASE_RUN_TESTS: n
-#      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
+    - name: Build
+      env:
+        KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
+        KUBE_RELEASE_RUN_TESTS: n
+      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
     - name: Calculate checksums
       id: calculate_checksums
       shell: bash
