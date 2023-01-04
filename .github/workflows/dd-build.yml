@@ -14,10 +14,10 @@ jobs:
         platform: ["linux/arm64","linux/amd64"]
     steps:
     - uses: actions/checkout@v3
-    - name: Set up Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.15
+#    - name: Set up Go
+#      uses: actions/setup-go@v2
+#      with:
+#        go-version: 1.15
     - name: Setup Docker buildx
       uses: docker/setup-buildx-action@v2
     - name: Build pause container image
@@ -32,7 +32,11 @@ jobs:
         mkdir -p _output/release-pause-tars
         cd ./build/pause
         make container OS=${OS} ARCH=${ARCH}
+        echo pause image build done
+        docker images
+        echo docker image list done
         docker save -o ../../_output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
+        echo docker save done
         gzip _output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar
 #    - name: Build
 #      env:
