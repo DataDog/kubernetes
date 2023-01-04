@@ -30,16 +30,16 @@ jobs:
       shell: bash
       env:
         KUBE_BUILD_PLATFORM: ${{ matrix.platform }}
+        REGISTRY: k8s.datadoghq.com
       run: |
         TARGET_PLATFORM="${KUBE_BUILD_PLATFORM/\//-}"
         OS="${KUBE_BUILD_PLATFORM%%/*}"
         ARCH="${KUBE_BUILD_PLATFORM##*/}"
         cd ./build/pause
         PAUSE_TAG=$(awk '/^TAG = [0-9.]+$/ { print $3}' Makefile)
-        make container OS=${OS} ARCH=${ARCH}
+        make container OS=${OS} ARCH=${ARCH} REGISTRY=${REGISTRY}
         cd ../..
-        docker images
-        docker save -o _output/release-tars/pause-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:${PAUSE_TAG}-${TARGET_PLATFORM}
+        docker save -o _output/release-tars/pause-${TARGET_PLATFORM}.tar ${REGISTRY}/pause:${PAUSE_TAG}-${TARGET_PLATFORM}
         gzip -v _output/release-tars/pause-${TARGET_PLATFORM}.tar
         echo ${PAUSE_TAG} > pause-tag.txt
         tar czf _output/release-tars/pause-tag-${TARGET_PLATFORM}.tar.gz pause-tag.txt
