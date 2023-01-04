@@ -25,7 +25,7 @@ jobs:
     - name: Build pause container image
       shell: bash
       env:
-        KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
+        KUBE_BUILD_PLATFORM: ${{ matrix.platform }}
       run: |
         TARGET_PLATFORM="${KUBE_BUILD_PLATFORM/\//-}"
         OS="${KUBE_BUILD_PLATFORM%%/*}"
