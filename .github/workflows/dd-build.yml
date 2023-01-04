@@ -23,6 +23,7 @@ jobs:
     - name: Setup Docker buildx
       uses: docker/setup-buildx-action@v2
     - name: Build pause container image
+      shell: bash
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
       run: |
