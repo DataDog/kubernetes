@@ -20,11 +20,25 @@ jobs:
       uses: actions/setup-go@v2
       with:
         go-version: 1.15
-    - name: Build
+    - name: Setup Docker buildx
+      uses: docker/setup-buildx-action@v2
+    - name: Build pause container image
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
-        KUBE_RELEASE_RUN_TESTS: n
-      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
+      run: |
+        TARGET_PLATFORM="${KUBE_BUILD_PLATFORM/\//-}"
+        OS="${KUBE_BUILD_PLATFORM%%/*}"
+        ARCH="${KUBE_BUILD_PLATFORM##*/}"
+        mkdir -p _output/release-pause-tars
+        cd ./build/pause
+        make container OS=${OS} ARCH=${ARCH}
+        docker save -o ../../_output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
+        gzip _output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar
+#    - name: Build
+#      env:
+#        KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
+#        KUBE_RELEASE_RUN_TESTS: n
+#      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
     - name: Calculate checksums
       id: calculate_checksums
       shell: bash
@@ -92,7 +106,8 @@ jobs:
         assets: [
            "kubernetes-client",
            "kubernetes-node",
-           "kubernetes-server"
+           "kubernetes-server",
+           "pause-3.6"
         ]
         platform: ["linux-arm64","linux-amd64"]
         extension: ["tar.gz", "tar.gz.sha256sum"]
@@ -104,7 +119,7 @@ jobs:
     - name: Display structure of downloaded files
       run: ls -R
       working-directory: _output
-    - name: Upload Release Asset
+    - name: Upload main release assets
       id: upload-release-asset
       uses: actions/upload-release-asset@v1
       env:
