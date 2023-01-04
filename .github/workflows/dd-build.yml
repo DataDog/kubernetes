@@ -6,6 +6,7 @@ on:
     tags:
     # Push events on datadog tags
     - "*-dd*"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,17 +34,15 @@ jobs:
         TARGET_PLATFORM="${KUBE_BUILD_PLATFORM/\//-}"
         OS="${KUBE_BUILD_PLATFORM%%/*}"
         ARCH="${KUBE_BUILD_PLATFORM##*/}"
-        echo TARGET_PLATFORM=${TARGET_PLATFORM}, OS=${OS}, ARCH=${ARCH}
-        mkdir -p _output/release-tars
         cd ./build/pause
+        PAUSE_TAG=$(awk '/^TAG = [0-9.]+$/ { print $3}' Makefile)
         make container OS=${OS} ARCH=${ARCH}
         cd ../..
-        echo pause image build done
         docker images
-        echo docker image list done
-        docker save -o _output/release-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
-        echo docker save done
-        gzip -v _output/release-tars/pause-3.6-${TARGET_PLATFORM}.tar
+        docker save -o _output/release-tars/pause-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:${PAUSE_TAG}-${TARGET_PLATFORM}
+        gzip -v _output/release-tars/pause-${TARGET_PLATFORM}.tar
+        echo ${PAUSE_TAG} > pause-tag.txt
+        tar czf _output/release-tars/pause-tag-${TARGET_PLATFORM}.tar.gz pause-tag.txt
         ls -l _output/release-tars
     - name: Calculate checksums
       id: calculate_checksums
@@ -114,7 +113,8 @@ jobs:
            "kubernetes-client",
            "kubernetes-node",
            "kubernetes-server",
-           "pause-3.6"
+           "pause",
+           "pause-tag"
         ]
         platform: ["linux-arm64","linux-amd64"]
         extension: ["tar.gz", "tar.gz.sha256sum"]
