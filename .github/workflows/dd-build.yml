@@ -32,10 +32,11 @@ jobs:
         mkdir -p _output/release-pause-tars
         cd ./build/pause
         make container OS=${OS} ARCH=${ARCH}
+        cd ../..
         echo pause image build done
         docker images
         echo docker image list done
-        docker save -o ../../_output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
+        docker save -o _output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
         echo docker save done
         gzip _output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar
 #    - name: Build
