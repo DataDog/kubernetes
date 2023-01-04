@@ -29,6 +29,7 @@ jobs:
         TARGET_PLATFORM="${KUBE_BUILD_PLATFORM/\//-}"
         OS="${KUBE_BUILD_PLATFORM%%/*}"
         ARCH="${KUBE_BUILD_PLATFORM##*/}"
+        echo TARGET_PLATFORM=${TARGET_PLATFORM}, OS=${OS}, ARCH=${ARCH}
         mkdir -p _output/release-pause-tars
         cd ./build/pause
         make container OS=${OS} ARCH=${ARCH}
