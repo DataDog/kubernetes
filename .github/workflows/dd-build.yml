@@ -29,16 +29,16 @@ jobs:
         OS="${KUBE_BUILD_PLATFORM%%/*}"
         ARCH="${KUBE_BUILD_PLATFORM##*/}"
         echo TARGET_PLATFORM=${TARGET_PLATFORM}, OS=${OS}, ARCH=${ARCH}
-        mkdir -p _output/release-pause-tars
+        mkdir -p _output/release-tars
         cd ./build/pause
         make container OS=${OS} ARCH=${ARCH}
         cd ../..
         echo pause image build done
         docker images
         echo docker image list done
-        docker save -o _output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
+        docker save -o _output/release-tars/pause-3.6-${TARGET_PLATFORM}.tar staging-k8s.gcr.io/pause:3.6-${TARGET_PLATFORM}
         echo docker save done
-        gzip _output/release-pause-tars/pause-3.6-${TARGET_PLATFORM}.tar
+        gzip _output/release-tars/pause-3.6-${TARGET_PLATFORM}.tar
 #    - name: Build
 #      env:
 #        KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
