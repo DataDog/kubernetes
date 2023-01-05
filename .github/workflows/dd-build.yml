@@ -6,6 +6,7 @@ on:
     tags:
     # Push events on datadog tags
     - "*-dd*"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,9 +14,7 @@ jobs:
       matrix:
         platform: ["linux/arm64","linux/amd64"]
     steps:
-    - uses: actions/checkout@v2
-      with:
-        fetch-depth: 0
+    - uses: actions/checkout@v3
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
