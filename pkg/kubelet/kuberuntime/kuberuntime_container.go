@@ -775,6 +775,12 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(ctx context.Con
 		sidecars    []*kubecontainer.Container
 		nonSidecars []*kubecontainer.Container
 	)
+
+	if gracePeriodOverride == nil {
+		minGracePeriod := int64(minimumGracePeriodInSeconds)
+		gracePeriodOverride = &minGracePeriod
+	}
+
 	for _, container := range runningPod.Containers {
 		if isSidecar(pod, container.Name) {
 			sidecars = append(sidecars, container)
@@ -785,7 +791,7 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(ctx context.Con
 	containerResults := make(chan *kubecontainer.SyncResult, len(runningPod.Containers))
 	// non-sidecars first
 	start := time.Now()
-	klog.Infof("Pod: %s, killContainersWithSyncResult: killing %d non-sidecars, %s termination period", runningPod.Name, len(nonSidecars), gracePeriodOverride)
+	klog.Infof("Pod: %s, killContainersWithSyncResult: killing %d non-sidecars, %d termination period", runningPod.Name, len(nonSidecars), *gracePeriodOverride)
 	nonSidecarsWg := sync.WaitGroup{}
 	nonSidecarsWg.Add(len(nonSidecars))
 	for _, container := range nonSidecars {
