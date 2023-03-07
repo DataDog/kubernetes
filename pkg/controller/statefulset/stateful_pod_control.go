@@ -50,6 +50,8 @@ type StatefulPodControlInterface interface {
 	// DeleteStatefulPod deletes a Pod in a StatefulSet. The pods PVCs are not deleted. If the delete is successful,
 	// the returned error is nil.
 	DeleteStatefulPod(set *apps.StatefulSet, pod *v1.Pod) error
+	// CreateMissingPersistentVolumeClaims creates all of the required PersistentVolumeClaims for pod, and updates its retention policy
+	CreateMissingPersistentVolumeClaims(set *apps.StatefulSet, pod *v1.Pod) error
 }
 
 func NewRealStatefulPodControl(
@@ -172,6 +174,14 @@ func (spc *realStatefulPodControl) recordClaimEvent(verb string, set *apps.State
 			strings.ToLower(verb), claim.Name, pod.Name, set.Name, err)
 		spc.recorder.Event(set, v1.EventTypeWarning, reason, message)
 	}
+}
+
+func (spc *realStatefulPodControl) CreateMissingPersistentVolumeClaims(set *apps.StatefulSet, pod *v1.Pod) error {
+	if err := spc.createPersistentVolumeClaims(set, pod); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // createPersistentVolumeClaims creates all of the required PersistentVolumeClaims for pod, which must be a member of
