@@ -27,24 +27,24 @@ const kubeServiceAccountSubsystem = "serviceaccount"
 
 var (
 	// LegacyTokensTotal is the number of legacy tokens used against apiserver.
-	legacyTokensTotal = metrics.NewCounter(
+	legacyTokensTotal = metrics.NewCounterVec(
 		&metrics.CounterOpts{
 			Subsystem:      kubeServiceAccountSubsystem,
 			Name:           "legacy_tokens_total",
 			Help:           "Cumulative legacy service account tokens used",
 			StabilityLevel: metrics.ALPHA,
-		},
+		}, []string{"subject"},
 	)
 
 	// StaleTokensTotal is the number of stale projected tokens not refreshed on
 	// client side.
-	staleTokensTotal = metrics.NewCounter(
+	staleTokensTotal = metrics.NewCounterVec(
 		&metrics.CounterOpts{
 			Subsystem:      kubeServiceAccountSubsystem,
 			Name:           "stale_tokens_total",
 			Help:           "Cumulative stale projected service account tokens used",
 			StabilityLevel: metrics.ALPHA,
-		},
+		}, []string{"serviceaccount", "sa_namespace"},
 	)
 
 	// ValidTokensTotal is the number of valid projected tokens used.
