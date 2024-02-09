@@ -37,8 +37,9 @@ jobs:
         sudo rm -rf /usr/local/share/boost
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
      
-        sudo apt list --installed |grep julia
-        sudo apt list  --installed |grep haskell
+        sudo dpkg -l |grep julia
+        sudo dpkg -l |grep haskell
+
     - name: df
       shell: bash
       run: df -h
