@@ -24,6 +24,24 @@ jobs:
       uses: actions/setup-go@v2
       with:
         go-version: 1.21
+    - name: df
+      shell: bash
+      run: df -h
+      id: df_0
+      env:
+        GITHUB_REF: ${{ github.ref }}
+    - name: Cleanup disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+    - name: df
+      shell: bash
+      run: df -h
+      id: df_2
+      env:
+        GITHUB_REF: ${{ github.ref }}
     - name: Build
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
@@ -51,24 +69,6 @@ jobs:
     outputs:
       upload_url: ${{ steps.create_release_branch.outputs.upload_url }}${{ steps.create_release_tags.outputs.upload_url }}
     steps:
-    - name: df
-      shell: bash
-      run: df -h
-      id: df_0
-      env:
-        GITHUB_REF: ${{ github.ref }}
-    - name: Cleanup disk space
-      run: |
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /usr/local/share/boost
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-    - name: df
-      shell: bash
-      run: df -h
-      id: df_2
-      env:
-        GITHUB_REF: ${{ github.ref }}
     - name: Extract branch name
       shell: bash
       run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
