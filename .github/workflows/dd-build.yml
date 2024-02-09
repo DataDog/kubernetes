@@ -38,13 +38,13 @@ jobs:
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
         echo ### var ###
         sudo du -hd1 /var/lib
-        echo ### mnt ###
-        sudo du -hd1 /mnt
-        sudo ls -lah /mnt
         echo ### home ###
         sudo du -hd1 /home/runner
         echo ### usr ###
         sudo du -hd1 /usr/local
+        
+        sudo apt list |grep julia
+        sudo apt list |grep haskell
     - name: df
       shell: bash
       run: df -h
