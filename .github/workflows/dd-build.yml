@@ -24,28 +24,13 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: 1.21
-    - name: df
-      shell: bash
-      run: df -h
-      id: df_0
-      env:
-        GITHUB_REF: ${{ github.ref }}
     - name: Cleanup disk space
       run: |
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /opt/ghc
         sudo rm -rf /usr/local/share/boost
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-     
-        sudo dpkg -l |grep julia
-        sudo dpkg -l |grep haskell
-
-    - name: df
-      shell: bash
-      run: df -h
-      id: df_2
-      env:
-        GITHUB_REF: ${{ github.ref }}
+        sudo rm -rf /usr/local/.ghcup
     - name: Build
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
