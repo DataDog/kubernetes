@@ -19,9 +19,9 @@ jobs:
       matrix:
         platform: ["linux/arm64","linux/amd64"]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v5
       with:
         go-version: 1.21
     - name: df
@@ -43,8 +43,8 @@ jobs:
         echo ### usr ###
         sudo du -hd1 /usr/local
         
-        sudo apt list |grep julia
-        sudo apt list |grep haskell
+        sudo apt list --installed |grep julia
+        sudo apt list  --installed |grep haskell
     - name: df
       shell: bash
       run: df -h
