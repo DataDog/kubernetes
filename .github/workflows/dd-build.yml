@@ -36,7 +36,10 @@ jobs:
         sudo rm -rf /opt/ghc
         sudo rm -rf /usr/local/share/boost
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-        sudo du -d1 /
+        sudo du -hd1 /var
+        sudo du -hd1 /mnt
+        sudo du -hd1 /home
+        sudo du -hd1 /usr
     - name: df
       shell: bash
       run: df -h
