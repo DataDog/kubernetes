@@ -8,6 +8,8 @@ on:
     - "*-dd*"
     paths:
       - .github/workflows/dd-build.yml
+      - dd-build.yml
+    
 
 jobs:
   build:
