@@ -36,13 +36,7 @@ jobs:
         sudo rm -rf /opt/ghc
         sudo rm -rf /usr/local/share/boost
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-        echo ### var ###
-        sudo du -hd1 /var/lib
-        echo ### home ###
-        sudo du -hd1 /home/runner
-        echo ### usr ###
-        sudo du -hd1 /usr/local
-        
+     
         sudo apt list --installed |grep julia
         sudo apt list  --installed |grep haskell
     - name: df
