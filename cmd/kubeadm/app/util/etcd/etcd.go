@@ -33,6 +33,7 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,6 +126,11 @@ func New(endpoints []string, ca, cert, key string) (*Client, error) {
 			DialTimeout: etcdTimeout,
 			DialOptions: []grpc.DialOption{
 				grpc.WithBlock(), // block until the underlying connection is up
+				grpc.WithKeepaliveParams(keepalive.ClientParameters{
+					Time:                15 * time.Second,
+					Timeout:             3 * time.Second,
+					PermitWithoutStream: false,
+				}),
 			},
 			TLS: tlsConfig,
 		})
