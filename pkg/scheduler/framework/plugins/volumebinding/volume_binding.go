@@ -371,6 +371,7 @@ func (pl *VolumeBinding) PreFilter(ctx context.Context, state fwk.CycleState, po
 		status.AppendReason("pod has unbound immediate PersistentVolumeClaims")
 		return nil, status
 	}
+
 	state.Write(stateKey, &stateData{
 		podVolumesByNode: make(map[string]*PodVolumes),
 		podVolumeClaims: &PodVolumeClaims{
