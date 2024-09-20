@@ -416,6 +416,8 @@ function kube::build::run_build_command_ex() {
     --env "GOTOOLCHAIN=${GOTOOLCHAIN:-}"
     --env "GOFLAGS=${GOFLAGS:-}"
     --env "GOGCFLAGS=${GOGCFLAGS:-}"
+    --env "GOEXPERIMENT=boringcrypto"
+    --env "DBG=1"
     --env "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-}"
     # mount source code / output dir
     --volume "${KUBE_ROOT}:${KUBE_CROSS_CONTAINER_ROOT}"
