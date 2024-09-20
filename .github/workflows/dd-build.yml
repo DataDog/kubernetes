@@ -36,7 +36,7 @@ jobs:
       env:
         KUBE_BUILD_PLATFORMS: ${{ matrix.platform }}
         KUBE_RELEASE_RUN_TESTS: n
-      run: make quick-release KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
+      run: make quick-release CGO_ENABLED=1 KUBE_CGO_OVERRIDES="kube-apiserver kube-controller-manager kube-scheduler kubelet" KUBE_BUILD_PLATFORMS=$KUBE_BUILD_PLATFORMS
     - name: Calculate checksums
       id: calculate_checksums
       shell: bash
