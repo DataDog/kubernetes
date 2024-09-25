@@ -2533,7 +2533,11 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 		// shutting it down. If the pod hasn't started yet, we know that when
 		// the pod worker is invoked it will also avoid setting up the pod, so
 		// we simply avoid doing any work.
-		if !kl.podWorkers.IsPodTerminationRequested(pod.UID) {
+		// IsPodTerminationRequested is based on the attribute terminatingAt of the pod worker.
+		// When the kubelet restart, the pods are going through this function again, but the pod worker is
+		// not yet updated with the info from the api server. So we need to check the pod worker's status
+		// to see if the pod is already terminated.
+		if !kl.podWorkers.IsPodTerminationRequested(pod.UID) && pod.Status.Phase != v1.PodSucceeded && pod.Status.Phase != v1.PodFailed {
 			// We failed pods that we rejected, so activePods include all admitted
 			// pods that are alive.
 			activePods := kl.filterOutInactivePods(existingPods)
