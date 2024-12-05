@@ -314,6 +314,29 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*clientv3.Client, e
 		// which seems to be what we want as the metrics will be collected on each attempt (retry)
 		grpc.WithChainUnaryInterceptor(grpcprom.UnaryClientInterceptor),
 		grpc.WithChainStreamInterceptor(grpcprom.StreamClientInterceptor),
+		grpc.WithDefaultServiceConfig(`
+		{
+			"loadBalancingConfig": [
+				{
+					"outlier_detection_experimental": {
+						"interval": "2s",
+						"baseEjectionTime": "30s",
+						"maxEjectionTime": "300s",
+						"maxEjectionPercent": 10,
+						"failurePercentageEjection": {
+							"threshold": 85,
+							"enforcementPercentage": 100,
+							"minimumHosts": 3,
+							"requestVolume": 5
+						},
+						"childPolicy": [{"round_robin": {}}]
+					}
+				}
+			],
+			"healthCheckConfig": {
+				"serviceName": ""
+			}
+		}`),
 	}
 	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerTracing) {
 		tracingOpts := []otelgrpc.Option{
