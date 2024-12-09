@@ -212,6 +212,8 @@ func NewClient(target string, opts ...DialOption) (conn *ClientConn, err error) 
 
 	cc.metricsRecorderList = stats.NewMetricsRecorderList(cc.dopts.copts.StatsHandlers)
 
+	cc.metricsRecorderList = stats.NewMetricsRecorderList(cc.dopts.copts.StatsHandlers)
+
 	cc.initIdleStateLocked() // Safe to call without the lock, since nothing else has a reference to cc.
 	cc.idlenessMgr = idle.NewManager((*idler)(cc), cc.dopts.idleTimeout)
 
