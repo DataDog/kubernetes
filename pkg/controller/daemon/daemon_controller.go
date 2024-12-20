@@ -1415,7 +1415,7 @@ func nodeShouldRunDaemonPod(logger klog.Logger, node *v1.Node, ds *apps.DaemonSe
 
 	taints := node.Spec.Taints
 	fitsNodeAffinity, fitsTaints := predicates(logger, node, taints, tolerations, requiredNodeAffinity)
-	if !fitsNodeAffinity {
+	if !fitsNodeAffinity && !labels.SelectorFromSet(ds.Spec.Template.Spec.NodeSelector).Matches(labels.Set(node.Labels)) {
 		return false, false
 	}
 
@@ -1425,6 +1425,11 @@ func nodeShouldRunDaemonPod(logger klog.Logger, node *v1.Node, ds *apps.DaemonSe
 			return t.Effect == v1.TaintEffectNoExecute
 		}, utilfeature.DefaultFeatureGate.Enabled(features.TaintTolerationComparisonOperators))
 		return false, !hasUntoleratedTaint
+	}
+
+	if !fitsNodeAffinity {
+		// IgnoredDuringExecution means that if the node labels change after Kubernetes schedules the Pod, the Pod continues to run.
+		return false, true
 	}
 
 	return true, true
@@ -1576,10 +1581,12 @@ func (dsc *DaemonSetsController) syncNodeUpdate(ctx context.Context, nodeName st
 		//    - Need to create a new pod on this node
 		// 2. (!shouldContinueRunning && scheduled): Node no longer meets requirements but pod exists
 		//    - Need to delete the existing pod from this node
-		// 3. (scheduled && ds.Status.NumberMisscheduled > 0): DaemonSet pod exists and misscheduled count is nonzero.
-		//    - For example: a pod was scheduled before the node became unready and tainted; after the node becomes ready and taints are removed, the pod may now be valid again.
-		//    - Need to recalculate NumberMisscheduled to ensure the DaemonSet status accurately reflects the current scheduling state.
-		if (shouldRun && !scheduled) || (!shouldContinueRunning && scheduled) || (scheduled && ds.Status.NumberMisscheduled > 0) {
+		// 3. (!shouldRun && shouldContinueRunning): misschedule-able state for this DS on this node
+		//    (RequiredDuringSchedulingIgnoredDuringExecution affinity mismatch, or NoSchedule-tainted-but-NoExecute-tolerated).
+		//    Independent of `scheduled`: the by-node pod index can lag pod creation between
+		//    podControl.CreatePods and scheduler binding. The DS reconciler is idempotent.
+		// 4. (scheduled && ds.Status.NumberMisscheduled > 0): recovery — stale NumberMisscheduled needs recomputation.
+		if (shouldRun && !scheduled) || (!shouldContinueRunning && scheduled) || (!shouldRun && shouldContinueRunning) || (scheduled && ds.Status.NumberMisscheduled > 0) {
 			dsc.enqueueDaemonSet(ds)
 		}
 	}
