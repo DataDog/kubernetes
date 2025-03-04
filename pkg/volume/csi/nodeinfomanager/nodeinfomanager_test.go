@@ -308,6 +308,21 @@ func TestInstallCSIDriver(t *testing.T) {
 			},
 		},
 		{
+			name: "pre-existing node info, but owned by previous node",
+			existingNode: func() *v1.Node {
+				node := generateNode(nil /*nodeIDs*/, nil /*labels*/, nil /*capacity*/)
+				node.UID = types.UID("node1")
+				return node
+			}(),
+			existingCSINode: func() *storage.CSINode {
+				csiNode := generateCSINode(nil /*nodeIDs*/, nil /*volumeLimits*/, nil /*topologyKeys*/)
+				csiNode.OwnerReferences[0].UID = types.UID("node2")
+				return csiNode
+			}(),
+			inputNodeID: "com.example.csi/csi-node1",
+			expectFail:  true,
+		},
+		{
 			name:          "nil topology, empty node",
 			driverName:    "com.example.csi.driver1",
 			existingNode:  generateNode(nil /* nodeIDs */, nil /* labels */, nil /*capacity*/),
@@ -972,7 +987,7 @@ func TestInstallCSIDriverExistingAnnotation(t *testing.T) {
 		nim := NewNodeInfoManager(types.NodeName(nodeName), host, nil)
 
 		// Act
-		_, err = nim.CreateCSINode()
+		_, err = nim.CreateCSINode(tc.existingNode)
 		if err != nil {
 			t.Errorf("expected no error from creating CSINodeinfo but got: %v", err)
 			continue
@@ -1032,7 +1047,7 @@ func test(t *testing.T, addNodeInfo bool, testcases []testcase) {
 		nim := NewNodeInfoManager(types.NodeName(nodeName), host, nil)
 
 		//// Act
-		nim.CreateCSINode()
+		nim.CreateCSINode(tc.existingNode)
 		if addNodeInfo {
 			err = nim.InstallCSIDriver(tc.driverName, tc.inputNodeID, tc.inputVolumeLimit, tc.inputTopology)
 		} else {
