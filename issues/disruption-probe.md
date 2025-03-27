@@ -6,7 +6,7 @@ An issue our users often run into is that temporarily they do not want their pod
 
 We have worked around this writing a controller that modifies the `spec.maxUnavailable` field, setting it to `0` to block disruption and setting it back to enable.
  
-The request is to have a mechanism provided by Kubernetes that can distinguish between whether a pod should be routable (readiness) and whether a pod should be disruptable. The solution outlined here is to have a disruption probe and pod status, similar to readiness.
+The request is to have a mechanism provided by Kubernetes that can distinguish between whether a pod should be routable (readiness) and whether a pod should be disruptable. If not provided, the behavior will be as is today with readiness controlling disruptability. The solution outlined here is to have a disruption probe and pod status, similar to readiness.
 
 # Proposal
 
@@ -43,7 +43,6 @@ Similarly there will be a corresponding status on the pod, an example portion of
         "type": "Ready"
     },
     { # new
-        "lastProbeTime": null,
         "lastTransitionTime": "2025-02-05T20:26:15Z",
         "status": "True",
         "type": "Disruptable"
