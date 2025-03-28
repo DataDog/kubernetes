@@ -74,7 +74,7 @@ type nodeUpdateFunc func(*v1.Node) (newNode *v1.Node, updated bool, err error)
 
 // Interface implements an interface for managing labels of a node
 type Interface interface {
-	CreateCSINode() (*storagev1.CSINode, error)
+	CreateCSINode(node *v1.Node) (*storagev1.CSINode, error)
 
 	// Updates or Creates the CSINode object with annotations for CSI Migration
 	InitializeCSINodeWithAnnotation() error
@@ -378,15 +378,34 @@ func (nim *nodeInfoManager) tryUpdateCSINode(
 	maxAttachLimit int64,
 	topology map[string]string) error {
 
-	nodeInfo, err := csiKubeClient.StorageV1().CSINodes().Get(context.TODO(), string(nim.nodeName), metav1.GetOptions{})
-	if nodeInfo == nil || errors.IsNotFound(err) {
-		nodeInfo, err = nim.CreateCSINode()
-	}
+	node, err := csiKubeClient.CoreV1().Nodes().Get(context.TODO(), string(nim.nodeName), metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 
+	nodeInfo, err := csiKubeClient.StorageV1().CSINodes().Get(context.TODO(), string(nim.nodeName), metav1.GetOptions{})
+	if nodeInfo == nil || errors.IsNotFound(err) {
+		nodeInfo, err = nim.CreateCSINode(node)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if !nodeOwnsCSINode(node, nodeInfo) {
+		return fmt.Errorf("CSINode %q is owned by different node", nodeInfo.Name)
+	}
+
 	return nim.installDriverToCSINode(nodeInfo, driverName, driverNodeID, maxAttachLimit, topology)
+}
+
+func nodeOwnsCSINode(node *v1.Node, nodeInfo *storagev1.CSINode) bool {
+	for _, ownerRef := range nodeInfo.OwnerReferences {
+		if ownerRef.Kind == nodeKind.Kind && ownerRef.Name == node.Name && ownerRef.UID == node.UID {
+			return true
+		}
+	}
+	return false
 }
 
 func (nim *nodeInfoManager) InitializeCSINodeWithAnnotation() error {
@@ -411,13 +430,22 @@ func (nim *nodeInfoManager) InitializeCSINodeWithAnnotation() error {
 }
 
 func (nim *nodeInfoManager) tryInitializeCSINodeWithAnnotation(csiKubeClient clientset.Interface) error {
+	node, err := csiKubeClient.CoreV1().Nodes().Get(context.TODO(), string(nim.nodeName), metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	nodeInfo, err := csiKubeClient.StorageV1().CSINodes().Get(context.TODO(), string(nim.nodeName), metav1.GetOptions{})
 	if nodeInfo == nil || errors.IsNotFound(err) {
 		// CreateCSINode will set the annotation
-		_, err = nim.CreateCSINode()
+		_, err = nim.CreateCSINode(node)
 		return err
 	} else if err != nil {
 		return err
+	}
+
+	if !nodeOwnsCSINode(node, nodeInfo) {
+		return fmt.Errorf("CSINode %q is owned by different node", nodeInfo.Name)
 	}
 
 	annotationModified := setMigrationAnnotation(nim.migratedPlugins, nodeInfo)
@@ -430,16 +458,11 @@ func (nim *nodeInfoManager) tryInitializeCSINodeWithAnnotation(csiKubeClient cli
 
 }
 
-func (nim *nodeInfoManager) CreateCSINode() (*storagev1.CSINode, error) {
+func (nim *nodeInfoManager) CreateCSINode(node *v1.Node) (*storagev1.CSINode, error) {
 
 	csiKubeClient := nim.volumeHost.GetKubeClient()
 	if csiKubeClient == nil {
 		return nil, fmt.Errorf("error getting CSI client")
-	}
-
-	node, err := csiKubeClient.CoreV1().Nodes().Get(context.TODO(), string(nim.nodeName), metav1.GetOptions{})
-	if err != nil {
-		return nil, err
 	}
 
 	nodeInfo := &storagev1.CSINode{
