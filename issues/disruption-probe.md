@@ -15,6 +15,8 @@ This means that the cluster is in a state where we need to serve traffic for sta
 
 The Elasticsearch operator has a similar problem. Elasticsearch clusters can be in different [health states (green / yellow / red)](https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html). If the cluster health is not green, it means that it could still be ready, but the system shouldn't disrupt any of the pods.
 
+Unfortunately, they can't rely on readiness probes only. If a [cluster is in a yellow state](https://www.elastic.co/guide/en/elasticsearch/reference/current/red-yellow-cluster-status.html), it means, for example, that one of the shards is missing replicas. So there should not be any disruption to prevent data loss, but the cluster nodes should still be ready to be able to serve traffic.
+
 To mitigate the problem, the operator maintains logic to [update the cluster's PDB](https://github.com/elastic/cloud-on-k8s/blob/v2.16.1/pkg/controller/elasticsearch/pdb/reconcile.go#L193-L197) and change the `minAvailable` count depending on the health.
 
 ### Impact
@@ -71,8 +73,6 @@ Similarly there will be a corresponding status on the pod, an example portion of
 ## Behavior, Implementation, and Details
 
 If the disruption probe is defined, only pods with a `True` `Disruptable` condition status (see above status) will count towards the quota for disruption. The disruption controller will need to take this into account _instead_ of the `Ready` condition of pods it looks at today. To maintain current behaviour, if no disruption probe is defined, the kubelet will sync the `Ready` status to the `Disruptable` condition.
-
-There is a concern around starvation, meaning that pods could in theory (and likely in practice) never allow themselves to be disrupted. This concern exists for readiness too, but there is a natural pushback on the user as during this time the won't be routed to so it cannot continue business as usual. It may be worth considering limitations on how long a pod can be considered "not disruptable". It's worth noting that this users currently have an easy mechanism to block eviction, namely to create a PDB that does not allow any disruptions.
 
 It's important that the system we build to support this use case fails closed. Meaning that if it doesn't work correctly we don't accidentally allow evictions that should not be allowed. Probes give this, because having a disruption probe initiated by the kubelet keeps the failure domain consistent with the kubelet, meaning that the eviction won't happen unless the kubelet is a healthy member of the cluster _and_ the kubelet gets an OK response from the relevant pods. An alternate solution could be to have a centralized controller effectively manage the `Disruptable` condition, among other problems this system would likely be difficult to make fail closed.
 
