@@ -11,6 +11,8 @@ There are several examples where application owners had to build workarounds for
 We are running a custom-built database that serves real-time data. On pod startup, it is assigned a shard and synchronizes data with its siblings in the background. It can be configured to serve traffic once it has reached a certain amount of data while continuing to sync the rest of the data in the background.
 This means that the cluster is in a state where we need to serve traffic for stability reasons, but can't afford to lose another pod of the same shard during that time.
 
+Readiness probes could be used by increasing the shard replica count, but it's tightly connected to the total cost of the application, which will increase significantly when running many small clusters.
+
 ### Example 2)
 
 The Elasticsearch operator has a similar problem. Elasticsearch clusters can be in different [health states (green / yellow / red)](https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html). If the cluster health is not green, it means that it could still be ready, but the system shouldn't disrupt any of the pods.
