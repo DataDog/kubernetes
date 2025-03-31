@@ -17,7 +17,7 @@ Readiness probes could be used by increasing the shard replica count, but it's t
 
 The Elasticsearch operator has a similar problem. Elasticsearch clusters can be in different [health states (green / yellow / red)](https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html). If the cluster health is not green, it means that it could still be ready, but the system shouldn't disrupt any of the pods.
 
-Unfortunately, they can't rely on readiness probes only. If a [cluster is in a yellow state](https://www.elastic.co/guide/en/elasticsearch/reference/current/red-yellow-cluster-status.html), it means, for example, that one of the shards is missing replicas. So there should not be any disruption to prevent data loss, but the cluster nodes should still be ready to be able to serve traffic.
+Unfortunately, they can't rely on readiness probes only. If a [cluster is in a yellow state](https://www.elastic.co/guide/en/elasticsearch/reference/current/red-yellow-cluster-status.html), it means, for example, that one of the shards is missing replicas. So there should not be any disruption to prevent cluster stability issues, but the cluster nodes should still be ready to be able to serve traffic.
 
 To mitigate the problem, the operator maintains logic to [update the cluster's PDB](https://github.com/elastic/cloud-on-k8s/blob/v2.16.1/pkg/controller/elasticsearch/pdb/reconcile.go#L193-L197) and change the `minAvailable` count depending on the health.
 
