@@ -81,3 +81,5 @@ It's important that the system we build to support this use case fails closed. M
 ## Next steps
 
 We are hoping to gauge interest with a lighter weight issue, if there is interest we will convert to a KEP.
+
+Besides that, the issue might be related to the newly created [node-lifecycle WG](https://github.com/kubernetes/community/pull/8396). We would be happy to present the topic in that context too.
