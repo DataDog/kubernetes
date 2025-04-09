@@ -641,6 +641,12 @@ func (gc *GarbageCollector) attemptToDeleteItem(ctx context.Context, item *node)
 			"item", item.identity,
 			"propagationPolicy", policy,
 		)
+		timeToDeletion := 1 * time.Minute
+		logger.Info("Item is going to be deleted",
+			"item", item.identity,
+			"timeToDeletion", timeToDeletion.String(),
+		)
+		time.Sleep(timeToDeletion)
 		return gc.deleteObject(item.identity, &policy)
 	}
 }
