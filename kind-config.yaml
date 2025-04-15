@@ -1,0 +1,16 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: repro-csinode
+nodes:
+- role: control-plane
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    logging:
+      verbosity: 5
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        v: "5"
