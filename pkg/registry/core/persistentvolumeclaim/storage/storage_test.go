@@ -39,7 +39,7 @@ import (
 	"k8s.io/kubernetes/pkg/registry/registrytest"
 )
 
-func newStorage(t *testing.T) (*REST, *StatusREST, *etcd3testing.EtcdTestServer) {
+func newStorage(t *testing.T) (*REST, *StatusREST, *StorageClassREST, *etcd3testing.EtcdTestServer) {
 	etcdStorage, server := registrytest.NewEtcdStorage(t, "")
 	restOptions := generic.RESTOptions{
 		StorageConfig:           etcdStorage,
@@ -47,11 +47,11 @@ func newStorage(t *testing.T) (*REST, *StatusREST, *etcd3testing.EtcdTestServer)
 		DeleteCollectionWorkers: 1,
 		ResourcePrefix:          "persistentvolumeclaims",
 	}
-	persistentVolumeClaimStorage, statusStorage, err := NewREST(restOptions)
+	pvcStorage, err := NewREST(restOptions)
 	if err != nil {
 		t.Fatalf("unexpected error from REST storage: %v", err)
 	}
-	return persistentVolumeClaimStorage, statusStorage, server
+	return pvcStorage.PersistentVolumeClaim, pvcStorage.Status, pvcStorage.StorageClass, server
 }
 
 func validNewPersistentVolumeClaim(name, ns string) *api.PersistentVolumeClaim {
@@ -76,7 +76,7 @@ func validNewPersistentVolumeClaim(name, ns string) *api.PersistentVolumeClaim {
 }
 
 func TestCreate(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	test := genericregistrytest.New(t, storage.Store)
@@ -93,7 +93,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	test := genericregistrytest.New(t, storage.Store)
@@ -110,7 +110,7 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	test := genericregistrytest.New(t, storage.Store).ReturnDeletedObject()
@@ -118,7 +118,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	test := genericregistrytest.New(t, storage.Store)
@@ -126,7 +126,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	test := genericregistrytest.New(t, storage.Store)
@@ -134,7 +134,7 @@ func TestList(t *testing.T) {
 }
 
 func TestWatch(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	test := genericregistrytest.New(t, storage.Store)
@@ -159,7 +159,7 @@ func TestWatch(t *testing.T) {
 }
 
 func TestUpdateStatus(t *testing.T) {
-	storage, statusStorage, server := newStorage(t)
+	storage, statusStorage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	ctx := genericapirequest.NewDefaultContext()
@@ -205,7 +205,7 @@ func TestUpdateStatus(t *testing.T) {
 }
 
 func TestShortNames(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	expected := []string{"pvc"}
@@ -213,7 +213,7 @@ func TestShortNames(t *testing.T) {
 }
 
 func TestDefaultOnReadPvc(t *testing.T) {
-	storage, _, server := newStorage(t)
+	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
 	dataSource := api.TypedLocalObjectReference{
@@ -305,4 +305,88 @@ func TestDefaultOnReadPvc(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStorageClassRESTUpdate(t *testing.T) {
+	storage, _, storageClassStorage, server := newStorage(t)
+	defer server.Terminate(t)
+	defer storage.Store.DestroyFunc()
+	ctx := genericapirequest.NewDefaultContext()
+
+	// Create a PVC first
+	pvc := validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault)
+	pvc.Spec.StorageClassName = stringPtr("fast")
+
+	_, err := storage.Create(ctx, pvc, rest.ValidateAllObjectFunc, &metav1.CreateOptions{})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Update storage class via the subresource
+	updatedPvc := pvc.DeepCopy()
+	updatedPvc.Spec.StorageClassName = stringPtr("slow")
+
+	result, created, err := storageClassStorage.Update(
+		ctx,
+		"foo",
+		rest.DefaultUpdatedObjectInfo(updatedPvc),
+		rest.ValidateAllObjectFunc,
+		rest.ValidateAllObjectUpdateFunc,
+		false,
+		&metav1.UpdateOptions{},
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error updating storage class: %v", err)
+	}
+	if created {
+		t.Errorf("expected update, not create")
+	}
+
+	if result == nil {
+		t.Fatal("expected result but got nil")
+	}
+
+	resultPvc, ok := result.(*api.PersistentVolumeClaim)
+	if !ok {
+		t.Errorf("expected PersistentVolumeClaim, got %T", result)
+		return
+	}
+
+	if resultPvc.Spec.StorageClassName == nil || *resultPvc.Spec.StorageClassName != "slow" {
+		t.Errorf("expected storage class 'slow', got %v", resultPvc.Spec.StorageClassName)
+	}
+}
+
+func TestStorageClassRESTGet(t *testing.T) {
+	storage, _, storageClassStorage, server := newStorage(t)
+	defer server.Terminate(t)
+	defer storage.Store.DestroyFunc()
+	ctx := genericapirequest.NewDefaultContext()
+
+	// Create a PVC first
+	pvc := validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault)
+	_, err := storage.Create(ctx, pvc, rest.ValidateAllObjectFunc, &metav1.CreateOptions{})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Get via the storage class subresource
+	result, err := storageClassStorage.Get(ctx, "foo", &metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("unexpected error getting via storage class subresource: %v", err)
+	}
+
+	resultPvc, ok := result.(*api.PersistentVolumeClaim)
+	if !ok {
+		t.Errorf("expected PersistentVolumeClaim, got %T", result)
+	}
+
+	if resultPvc.Name != "foo" {
+		t.Errorf("expected name 'foo', got %v", resultPvc.Name)
+	}
+}
+
+func stringPtr(s string) *string {
+	return &s
 }

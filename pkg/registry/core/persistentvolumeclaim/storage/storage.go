@@ -33,13 +33,20 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
+// PersistentVolumeClaimStorage includes storage for PersistentVolumeClaims and related subresources.
+type PersistentVolumeClaimStorage struct {
+	PersistentVolumeClaim *REST
+	Status                *StatusREST
+	StorageClass          *StorageClassREST
+}
+
 // REST implements a RESTStorage for persistent volume claims.
 type REST struct {
 	*genericregistry.Store
 }
 
 // NewREST returns a RESTStorage object that will work against persistent volume claims.
-func NewREST(optsGetter generic.RESTOptionsGetter) (*REST, *StatusREST, error) {
+func NewREST(optsGetter generic.RESTOptionsGetter) (PersistentVolumeClaimStorage, error) {
 	store := &genericregistry.Store{
 		NewFunc:                   func() runtime.Object { return &api.PersistentVolumeClaim{} },
 		NewListFunc:               func() runtime.Object { return &api.PersistentVolumeClaimList{} },
@@ -57,17 +64,26 @@ func NewREST(optsGetter generic.RESTOptionsGetter) (*REST, *StatusREST, error) {
 	}
 	options := &generic.StoreOptions{RESTOptions: optsGetter, AttrFunc: persistentvolumeclaim.GetAttrs}
 	if err := store.CompleteWithOptions(options); err != nil {
-		return nil, nil, err
+		return PersistentVolumeClaimStorage{}, err
 	}
 
 	statusStore := *store
 	statusStore.UpdateStrategy = persistentvolumeclaim.StatusStrategy
 	statusStore.ResetFieldsStrategy = persistentvolumeclaim.StatusStrategy
 
+	storageClassStore := *store
+	storageClassStore.UpdateStrategy = persistentvolumeclaim.StorageClassStrategy
+	storageClassStore.ResetFieldsStrategy = persistentvolumeclaim.StorageClassStrategy
+
 	rest := &REST{store}
 	store.Decorator = rest.defaultOnRead
 
-	return rest, &StatusREST{store: &statusStore}, nil
+	storageClassREST := &StorageClassREST{store: &storageClassStore}
+	return PersistentVolumeClaimStorage{
+		PersistentVolumeClaim: rest,
+		Status:                &StatusREST{store: &statusStore},
+		StorageClass:          storageClassREST,
+	}, nil
 }
 
 // Implement ShortNamesProvider
@@ -152,5 +168,42 @@ func (r *StatusREST) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
 }
 
 func (r *StatusREST) ConvertToTable(ctx context.Context, object runtime.Object, tableOptions runtime.Object) (*metav1.Table, error) {
+	return r.store.ConvertToTable(ctx, object, tableOptions)
+}
+
+// StorageClassREST implements the REST endpoint for changing the storage class of a persistentvolumeclaim.
+type StorageClassREST struct {
+	store *genericregistry.Store
+}
+
+// New creates a new PersistentVolumeClaim object.
+func (r *StorageClassREST) New() runtime.Object {
+	return &api.PersistentVolumeClaim{}
+}
+
+// Destroy cleans up resources on shutdown.
+func (r *StorageClassREST) Destroy() {
+	// Given that underlying store is shared with REST,
+	// we don't destroy it here explicitly.
+}
+
+// Get retrieves the object from the storage. It is required to support Patch.
+func (r *StorageClassREST) Get(ctx context.Context, name string, options *metav1.GetOptions) (runtime.Object, error) {
+	return r.store.Get(ctx, name, options)
+}
+
+// Update alters the storage class of an object.
+func (r *StorageClassREST) Update(ctx context.Context, name string, objInfo rest.UpdatedObjectInfo, createValidation rest.ValidateObjectFunc, updateValidation rest.ValidateObjectUpdateFunc, forceAllowCreate bool, options *metav1.UpdateOptions) (runtime.Object, bool, error) {
+	// We are explicitly setting forceAllowCreate to false in the call to the underlying storage because
+	// subresources should never allow create on update.
+	return r.store.Update(ctx, name, objInfo, createValidation, updateValidation, false, options)
+}
+
+// GetResetFields implements rest.ResetFieldsStrategy
+func (r *StorageClassREST) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
+	return r.store.GetResetFields()
+}
+
+func (r *StorageClassREST) ConvertToTable(ctx context.Context, object runtime.Object, tableOptions runtime.Object) (*metav1.Table, error) {
 	return r.store.ConvertToTable(ctx, object, tableOptions)
 }

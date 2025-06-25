@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/go-cmp/cmp"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,12 +29,14 @@ import (
 	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/names"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	pvcutil "k8s.io/kubernetes/pkg/api/persistentvolumeclaim"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/validation"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // persistentvolumeclaimStrategy implements behavior for PersistentVolumeClaim objects
@@ -123,7 +127,7 @@ func (persistentvolumeclaimStrategy) ValidateUpdate(ctx context.Context, obj, ol
 	oldPvc := old.(*api.PersistentVolumeClaim)
 	opts := validation.ValidationOptionsForPersistentVolumeClaim(newPvc, oldPvc)
 	errorList := validation.ValidatePersistentVolumeClaim(newPvc, opts)
-	return append(errorList, validation.ValidatePersistentVolumeClaimUpdate(newPvc, oldPvc, opts)...)
+	return append(errorList, validation.ValidatePersistentVolumeClaimUpdateWithContext(ctx, newPvc, oldPvc, opts)...)
 }
 
 // WarningsOnUpdate returns warnings for the given update.
@@ -171,6 +175,124 @@ func (persistentvolumeclaimStatusStrategy) ValidateUpdate(ctx context.Context, o
 // WarningsOnUpdate returns warnings for the given update.
 func (persistentvolumeclaimStatusStrategy) WarningsOnUpdate(ctx context.Context, obj, old runtime.Object) []string {
 	return nil
+}
+
+type persistentvolumeclaimStorageClassStrategy struct {
+	persistentvolumeclaimStrategy
+}
+
+var StorageClassStrategy = persistentvolumeclaimStorageClassStrategy{Strategy}
+
+// GetResetFields returns the set of fields that get reset by the strategy
+// and should not be modified by the user. For storage class updates, we only allow
+// storageClassName field to be modified.
+func (persistentvolumeclaimStorageClassStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
+	return Strategy.GetResetFields()
+}
+
+// PrepareForUpdate sets fields which are not allowed to be changed when updating a PVC's storage class
+func (persistentvolumeclaimStorageClassStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
+	newPVC := obj.(*api.PersistentVolumeClaim)
+	oldPVC := old.(*api.PersistentVolumeClaim)
+
+	// Store the desired storage class name
+	desiredStorageClassName := newPVC.Spec.StorageClassName
+
+	// Start with the old object and only change the storage class
+	*newPVC = *oldPVC
+	newPVC.Spec.StorageClassName = desiredStorageClassName
+}
+
+func (persistentvolumeclaimStorageClassStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
+	newPvc := obj.(*api.PersistentVolumeClaim)
+	oldPvc := old.(*api.PersistentVolumeClaim)
+
+	allErrs := field.ErrorList{}
+
+	// If storage class is not changing, this should not be a storage class update
+	if apiequality.Semantic.DeepEqual(oldPvc.Spec.StorageClassName, newPvc.Spec.StorageClassName) {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "storageClassName"),
+			"storage class is not changing; use the main PVC resource for other updates"))
+	}
+
+	opts := validation.ValidationOptionsForPersistentVolumeClaim(newPvc, oldPvc)
+	allErrs = append(allErrs, validation.ValidatePersistentVolumeClaim(newPvc, opts)...)
+
+	// Use a modified version of PVC update validation that doesn't check storage class changes
+	return append(allErrs, validatePersistentVolumeClaimUpdateForStorageClassSubresource(newPvc, oldPvc, opts)...)
+}
+
+// WarningsOnUpdate returns warnings for the given update.
+func (persistentvolumeclaimStorageClassStrategy) WarningsOnUpdate(ctx context.Context, obj, old runtime.Object) []string {
+	return nil
+}
+
+// validatePersistentVolumeClaimUpdateForStorageClassSubresource validates a PVC update
+// for the storageclass subresource, allowing storage class changes that would normally be forbidden
+func validatePersistentVolumeClaimUpdateForStorageClassSubresource(newPvc, oldPvc *api.PersistentVolumeClaim, opts validation.PersistentVolumeClaimSpecValidationOptions) field.ErrorList {
+	allErrs := validation.ValidateObjectMetaUpdate(&newPvc.ObjectMeta, &oldPvc.ObjectMeta, field.NewPath("metadata"))
+	newPvcClone := newPvc.DeepCopy()
+	oldPvcClone := oldPvc.DeepCopy()
+
+	// PVController needs to update PVC.Spec w/ VolumeName.
+	// Claims are immutable in order to enforce quota, range limits, etc. without gaming the system.
+	if len(oldPvc.Spec.VolumeName) == 0 {
+		// volumeName changes are allowed once.
+		oldPvcClone.Spec.VolumeName = newPvcClone.Spec.VolumeName // +k8s:verify-mutation:reason=clone
+	}
+
+	// For storage class subresource, allow storage class changes
+	// Skip the normal storage class immutability checks
+	oldPvcClone.Spec.StorageClassName = newPvcClone.Spec.StorageClassName // +k8s:verify-mutation:reason=clone
+
+	// lets make sure storage values are same.
+	if newPvc.Status.Phase == api.ClaimBound && newPvcClone.Spec.Resources.Requests != nil {
+		newPvcClone.Spec.Resources.Requests["storage"] = oldPvc.Spec.Resources.Requests["storage"] // +k8s:verify-mutation:reason=clone
+	}
+	// lets make sure volume attributes class name is same.
+	if newPvc.Status.Phase == api.ClaimBound && newPvcClone.Spec.VolumeAttributesClassName != nil {
+		newPvcClone.Spec.VolumeAttributesClassName = oldPvcClone.Spec.VolumeAttributesClassName // +k8s:verify-mutation:reason=clone
+	}
+
+	oldSize := oldPvc.Spec.Resources.Requests["storage"]
+	newSize := newPvc.Spec.Resources.Requests["storage"]
+	statusSize := oldPvc.Status.Capacity["storage"]
+
+	if !apiequality.Semantic.DeepEqual(newPvcClone.Spec, oldPvcClone.Spec) {
+		specDiff := cmp.Diff(oldPvcClone.Spec, newPvcClone.Spec)
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec"), fmt.Sprintf("spec is immutable after creation except resources.requests, volumeAttributesClassName for bound claims, and storageClassName via storageclass subresource\n%v", specDiff)))
+	}
+	if newSize.Cmp(oldSize) < 0 {
+		if !opts.EnableRecoverFromExpansionFailure {
+			allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "resources", "requests", "storage"), "field can not be less than previous value"))
+		} else {
+			// This validation permits reducing pvc requested size up to capacity recorded in pvc.status
+			// so that users can recover from volume expansion failure, but Kubernetes does not actually
+			// support volume shrinking
+			if newSize.Cmp(statusSize) <= 0 {
+				allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "resources", "requests", "storage"), "field can not be less than status.capacity"))
+			}
+		}
+	}
+
+	allErrs = append(allErrs, validation.ValidateImmutableField(newPvc.Spec.VolumeMode, oldPvc.Spec.VolumeMode, field.NewPath("volumeMode"))...)
+
+	if !apiequality.Semantic.DeepEqual(oldPvc.Spec.VolumeAttributesClassName, newPvc.Spec.VolumeAttributesClassName) {
+		if !utilfeature.DefaultFeatureGate.Enabled(features.VolumeAttributesClass) {
+			allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "volumeAttributesClassName"), "update is forbidden when the VolumeAttributesClass feature gate is disabled"))
+		}
+		if opts.EnableVolumeAttributesClass {
+			if oldPvc.Spec.VolumeAttributesClassName != nil {
+				if newPvc.Spec.VolumeAttributesClassName == nil {
+					allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "volumeAttributesClassName"), "update from non-nil value to nil is forbidden"))
+				} else if len(*newPvc.Spec.VolumeAttributesClassName) == 0 {
+					allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "volumeAttributesClassName"), "update from non-nil value to an empty string is forbidden"))
+				}
+			}
+		}
+	}
+
+	return allErrs
 }
 
 // GetAttrs returns labels and fields of a given object for filtering purposes.
