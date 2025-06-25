@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
@@ -32,6 +34,27 @@ import (
 	// ensure types are installed
 	_ "k8s.io/kubernetes/pkg/apis/core/install"
 )
+
+func validNewPersistentVolumeClaim(name, ns string) *api.PersistentVolumeClaim {
+	pv := &api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+		Spec: api.PersistentVolumeClaimSpec{
+			AccessModes: []api.PersistentVolumeAccessMode{api.ReadWriteOnce},
+			Resources: api.VolumeResourceRequirements{
+				Requests: api.ResourceList{
+					api.ResourceName(api.ResourceStorage): resource.MustParse("10G"),
+				},
+			},
+		},
+		Status: api.PersistentVolumeClaimStatus{
+			Phase: api.ClaimPending,
+		},
+	}
+	return pv
+}
 
 func TestSelectableFieldLabelConversions(t *testing.T) {
 	apitesting.TestSelectableFieldLabelConversionsOfKind(t,
@@ -365,4 +388,81 @@ func TestPrepareForCreate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStorageClassStrategy(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
+
+	if !StorageClassStrategy.NamespaceScoped() {
+		t.Errorf("PersistentVolumeClaim must be namespace scoped")
+	}
+	if StorageClassStrategy.AllowCreateOnUpdate() {
+		t.Errorf("PersistentVolumeClaim should not allow create on update")
+	}
+
+	// Test PrepareForUpdate - security enforcement
+	oldPvc := validNewPersistentVolumeClaim("test-pvc", "default")
+	oldPvc.Spec.StorageClassName = stringPtr("fast")
+	oldPvc.Spec.VolumeName = "existing-volume"
+	oldPvc.Status.Phase = api.ClaimBound
+
+	newPvc := oldPvc.DeepCopy()
+	newPvc.Spec.AccessModes = []api.PersistentVolumeAccessMode{api.ReadWriteMany} // changed
+	newPvc.Spec.Resources = api.VolumeResourceRequirements{
+		Requests: api.ResourceList{
+			api.ResourceName(api.ResourceStorage): resource.MustParse("20G"), // changed
+		},
+	}
+	newPvc.Spec.StorageClassName = stringPtr("slow") // changed
+	newPvc.Spec.VolumeName = "new-volume"            // changed
+	newPvc.Status.Phase = api.ClaimPending           // changed
+
+	// Test PrepareForUpdate
+	StorageClassStrategy.PrepareForUpdate(ctx, newPvc, oldPvc)
+
+	// Only storage class should be allowed to change, everything else should be reset
+	if !reflect.DeepEqual(newPvc.Spec.AccessModes, oldPvc.Spec.AccessModes) {
+		t.Errorf("access modes should be reset to old value, got %v, want %v", newPvc.Spec.AccessModes, oldPvc.Spec.AccessModes)
+	}
+	if !reflect.DeepEqual(newPvc.Spec.Resources, oldPvc.Spec.Resources) {
+		t.Errorf("resources should be reset to old value, got %v, want %v", newPvc.Spec.Resources, oldPvc.Spec.Resources)
+	}
+	if newPvc.Spec.VolumeName != oldPvc.Spec.VolumeName {
+		t.Errorf("volume name should be reset to old value, got %v, want %v", newPvc.Spec.VolumeName, oldPvc.Spec.VolumeName)
+	}
+	if !reflect.DeepEqual(newPvc.Status, oldPvc.Status) {
+		t.Errorf("status should be reset to old value, got %v, want %v", newPvc.Status, oldPvc.Status)
+	}
+	// Storage class should remain changed
+	if newPvc.Spec.StorageClassName == nil || *newPvc.Spec.StorageClassName != "slow" {
+		t.Errorf("storage class should remain changed, got %v, want %v", newPvc.Spec.StorageClassName, stringPtr("slow"))
+	}
+
+	// Test ValidateUpdate - valid case
+	validPvc := validNewPersistentVolumeClaim("test-pvc", "default")
+	validPvc.Spec.StorageClassName = stringPtr("slow")
+	validPvc.ResourceVersion = "1"
+	validOldPvc := validNewPersistentVolumeClaim("test-pvc", "default")
+	validOldPvc.Spec.StorageClassName = stringPtr("fast")
+	validOldPvc.ResourceVersion = "1"
+	errs := StorageClassStrategy.ValidateUpdate(ctx, validPvc, validOldPvc)
+	if len(errs) != 0 {
+		t.Errorf("expected no validation errors for valid storage class change, got: %v", errs)
+	}
+
+	// Test ValidateUpdate - invalid case (no change)
+	invalidPvc := validNewPersistentVolumeClaim("test-pvc", "default")
+	invalidPvc.Spec.StorageClassName = stringPtr("fast")
+	invalidPvc.ResourceVersion = "1"
+	invalidOldPvc := validNewPersistentVolumeClaim("test-pvc", "default")
+	invalidOldPvc.Spec.StorageClassName = stringPtr("fast") // same as new
+	invalidOldPvc.ResourceVersion = "1"
+	errs = StorageClassStrategy.ValidateUpdate(ctx, invalidPvc, invalidOldPvc)
+	if len(errs) == 0 {
+		t.Errorf("expected validation errors when storage class is not changing")
+	}
+}
+
+func stringPtr(s string) *string {
+	return &s
 }

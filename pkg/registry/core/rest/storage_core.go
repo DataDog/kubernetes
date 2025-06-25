@@ -173,7 +173,7 @@ func (p *legacyProvider) NewRESTStorage(apiResourceConfigSource serverstorage.AP
 	if err != nil {
 		return genericapiserver.APIGroupInfo{}, err
 	}
-	persistentVolumeClaimStorage, persistentVolumeClaimStatusStorage, err := pvcstore.NewREST(restOptionsGetter)
+	persistentVolumeClaimStorage, err := pvcstore.NewREST(restOptionsGetter)
 	if err != nil {
 		return genericapiserver.APIGroupInfo{}, err
 	}
@@ -304,8 +304,9 @@ func (p *legacyProvider) NewRESTStorage(apiResourceConfigSource serverstorage.AP
 	}
 
 	if resource := "persistentvolumeclaims"; apiResourceConfigSource.ResourceEnabled(corev1.SchemeGroupVersion.WithResource(resource)) {
-		storage[resource] = persistentVolumeClaimStorage
-		storage[resource+"/status"] = persistentVolumeClaimStatusStorage
+		storage[resource] = persistentVolumeClaimStorage.PersistentVolumeClaim
+		storage[resource+"/status"] = persistentVolumeClaimStorage.Status
+		storage[resource+"/storageclass"] = persistentVolumeClaimStorage.StorageClass
 	}
 
 	if resource := "componentstatuses"; apiResourceConfigSource.ResourceEnabled(corev1.SchemeGroupVersion.WithResource(resource)) {

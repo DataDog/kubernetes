@@ -17,6 +17,7 @@ limitations under the License.
 package validation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -2363,8 +2364,48 @@ func isDataSourceEqualDataSourceRef(dataSource *core.TypedLocalObjectReference, 
 	return reflect.DeepEqual(dataSource.APIGroup, dataSourceRef.APIGroup) && dataSource.Kind == dataSourceRef.Kind && dataSource.Name == dataSourceRef.Name
 }
 
+// validateStorageClassChange checks if storage class change is permitted
+// Authorization is handled at the REST layer via RBAC on the subresource
+func validateStorageClassChange(ctx context.Context, newPvc, oldPvc *core.PersistentVolumeClaim) *field.Error {
+	// Check if storage class is actually changing
+	oldStorageClass := ""
+	if oldPvc.Spec.StorageClassName != nil {
+		oldStorageClass = *oldPvc.Spec.StorageClassName
+	}
+
+	newStorageClass := ""
+	if newPvc.Spec.StorageClassName != nil {
+		newStorageClass = *newPvc.Spec.StorageClassName
+	}
+
+	// If storage class is not changing, allow the update (no special authorization needed)
+	if oldStorageClass == newStorageClass {
+		return nil
+	}
+
+	// Allow the special case of setting a storage class when it was previously nil
+	// This is an existing legitimate upgrade path that should be preserved
+	if oldPvc.Spec.StorageClassName == nil && newPvc.Spec.StorageClassName != nil {
+		return nil
+	}
+
+	// Other storage class changes require the user to have proper RBAC permissions
+	// on the persistentvolumeclaims/storageclass subresource. The authorization check
+	// is performed at the REST layer, not here in validation.
+
+	// For regular PVC updates, other storage class changes are forbidden
+	// Users must use the /storageclass subresource endpoint for these changes
+	return field.Forbidden(field.NewPath("spec", "storageClassName"),
+		"storage class changes are only allowed via the persistentvolumeclaims/storageclass subresource")
+}
+
 // ValidatePersistentVolumeClaimUpdate validates an update to a PersistentVolumeClaim
 func ValidatePersistentVolumeClaimUpdate(newPvc, oldPvc *core.PersistentVolumeClaim, opts PersistentVolumeClaimSpecValidationOptions) field.ErrorList {
+	return ValidatePersistentVolumeClaimUpdateWithContext(context.TODO(), newPvc, oldPvc, opts)
+}
+
+// ValidatePersistentVolumeClaimUpdateWithContext validates an update to a PersistentVolumeClaim with context
+func ValidatePersistentVolumeClaimUpdateWithContext(ctx context.Context, newPvc, oldPvc *core.PersistentVolumeClaim, opts PersistentVolumeClaimSpecValidationOptions) field.ErrorList {
 	allErrs := ValidateObjectMetaUpdate(&newPvc.ObjectMeta, &oldPvc.ObjectMeta, field.NewPath("metadata"))
 	allErrs = append(allErrs, ValidatePersistentVolumeClaim(newPvc, opts)...)
 	newPvcClone := newPvc.DeepCopy()
@@ -2382,16 +2423,21 @@ func ValidatePersistentVolumeClaimUpdate(newPvc, oldPvc *core.PersistentVolumeCl
 		newPvcClone.Spec.StorageClassName = nil
 		metav1.SetMetaDataAnnotation(&newPvcClone.ObjectMeta, core.BetaStorageClassAnnotation, oldPvcClone.Annotations[core.BetaStorageClassAnnotation])
 	} else {
-		// storageclass annotation should be immutable after creation
-		// TODO: remove Beta when no longer needed
-		allErrs = append(allErrs, ValidateImmutableAnnotation(newPvc.ObjectMeta.Annotations[v1.BetaStorageClassAnnotation], oldPvc.ObjectMeta.Annotations[v1.BetaStorageClassAnnotation], v1.BetaStorageClassAnnotation, field.NewPath("metadata"))...)
+		// Check for storage class change with RBAC validation
+		if err := validateStorageClassChange(ctx, newPvc, oldPvc); err != nil {
+			allErrs = append(allErrs, err)
+		} else {
+			// storageclass annotation should be immutable after creation
+			// TODO: remove Beta when no longer needed
+			allErrs = append(allErrs, ValidateImmutableAnnotation(newPvc.ObjectMeta.Annotations[v1.BetaStorageClassAnnotation], oldPvc.ObjectMeta.Annotations[v1.BetaStorageClassAnnotation], v1.BetaStorageClassAnnotation, field.NewPath("metadata"))...)
 
-		// If update from annotation to attribute failed we can attempt try to validate update from nil value.
-		if validateStorageClassUpgradeFromNil(oldPvc.Annotations, oldPvc.Spec.StorageClassName, newPvc.Spec.StorageClassName, opts) {
-			newPvcClone.Spec.StorageClassName = oldPvcClone.Spec.StorageClassName // +k8s:verify-mutation:reason=clone
+			// If update from annotation to attribute failed we can attempt try to validate update from nil value.
+			if validateStorageClassUpgradeFromNil(oldPvc.Annotations, oldPvc.Spec.StorageClassName, newPvc.Spec.StorageClassName, opts) {
+				newPvcClone.Spec.StorageClassName = oldPvcClone.Spec.StorageClassName // +k8s:verify-mutation:reason=clone
+			}
+			// TODO: add a specific error with a hint that storage class name can not be changed
+			// (instead of letting spec comparison below return generic field forbidden error)
 		}
-		// TODO: add a specific error with a hint that storage class name can not be changed
-		// (instead of letting spec comparison below return generic field forbidden error)
 	}
 
 	// lets make sure storage values are same.

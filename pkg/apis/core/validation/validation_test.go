@@ -18,6 +18,7 @@ package validation
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"reflect"
@@ -3051,6 +3052,151 @@ func TestValidatePersistentVolumeClaimUpdate(t *testing.T) {
 				t.Errorf("Unexpected failure for scenario: %s - %+v", name, errs)
 			}
 		})
+	}
+}
+
+func TestValidateStorageClassChange(t *testing.T) {
+	tests := map[string]struct {
+		oldPvc      *core.PersistentVolumeClaim
+		newPvc      *core.PersistentVolumeClaim
+		expectError bool
+		errorPath   string
+	}{
+		"no storage class change": {
+			oldPvc: testVolumeClaimStorageClassInSpec("foo", "ns", "fast", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			newPvc: testVolumeClaimStorageClassInSpec("foo", "ns", "fast", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			expectError: false,
+		},
+		"storage class change from fast to slow": {
+			oldPvc: testVolumeClaimStorageClassInSpec("foo", "ns", "fast", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			newPvc: testVolumeClaimStorageClassInSpec("foo", "ns", "slow", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			expectError: true,
+			errorPath:   "spec.storageClassName",
+		},
+		"storage class change from nil to fast": {
+			oldPvc: testVolumeClaimStorageClassNilInSpec("foo", "ns", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			newPvc: testVolumeClaimStorageClassInSpec("foo", "ns", "fast", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			expectError: false, // This should be allowed as it's an existing upgrade path
+		},
+		"storage class change from fast to nil": {
+			oldPvc: testVolumeClaimStorageClassInSpec("foo", "ns", "fast", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			newPvc: testVolumeClaimStorageClassNilInSpec("foo", "ns", core.PersistentVolumeClaimSpec{
+				AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+				Resources: core.VolumeResourceRequirements{
+					Requests: core.ResourceList{
+						core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+					},
+				},
+			}),
+			expectError: true,
+			errorPath:   "spec.storageClassName",
+		},
+	}
+
+	for testName, test := range tests {
+		t.Run(testName, func(t *testing.T) {
+			ctx := context.TODO()
+			err := validateStorageClassChange(ctx, test.newPvc, test.oldPvc)
+
+			if test.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if err.Field != test.errorPath {
+					t.Errorf("expected error at field %s, got %s", test.errorPath, err.Field)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error but got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestValidatePersistentVolumeClaimUpdateWithStorageClassChange(t *testing.T) {
+	// Test that regular PVC updates reject storage class changes
+	oldPvc := testVolumeClaimStorageClassInSpec("foo", "ns", "fast", core.PersistentVolumeClaimSpec{
+		AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+		Resources: core.VolumeResourceRequirements{
+			Requests: core.ResourceList{
+				core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+			},
+		},
+	})
+
+	newPvc := testVolumeClaimStorageClassInSpec("foo", "ns", "slow", core.PersistentVolumeClaimSpec{
+		AccessModes: []core.PersistentVolumeAccessMode{core.ReadWriteOnce},
+		Resources: core.VolumeResourceRequirements{
+			Requests: core.ResourceList{
+				core.ResourceName(core.ResourceStorage): resource.MustParse("10G"),
+			},
+		},
+	})
+
+	opts := ValidationOptionsForPersistentVolumeClaim(newPvc, oldPvc)
+	ctx := context.TODO()
+	errs := ValidatePersistentVolumeClaimUpdateWithContext(ctx, newPvc, oldPvc, opts)
+
+	// Should contain error about storage class changes being forbidden
+	found := false
+	for _, err := range errs {
+		if strings.Contains(err.Error(), "storage class changes are only allowed via the persistentvolumeclaims/storageclass subresource") {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected error about storage class changes being forbidden, got: %v", errs)
 	}
 }
 
