@@ -96,6 +96,19 @@ kubectl patch csinode repro-csinode-worker --type=merge --patch '{
   }
 }'
 
+echo "Modifying the CSI driver DaemonSet to tolerate all taints..."
+kubectl patch sts csi-hostpathplugin --type='json' -p='[
+    {
+      "op": "replace",
+      "path": "/spec/template/spec/tolerations",
+      "value": [
+        {
+          "operator": "Exists"
+        }
+      ]
+    }
+  ]'
+
 # Simulate the race condition
 echo "8. Simulating the race condition..."
 echo "   a. Draining worker node..."
