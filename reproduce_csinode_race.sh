@@ -89,6 +89,13 @@ else
     exit 1
 fi
 
+echo "Adding a finalizer to the CSINode to delay deletion..."
+kubectl patch csinode repro-csinode-worker --type=merge --patch '{
+  "metadata": {
+    "finalizers": ["example.com/spot-finalizer"]
+  }
+}'
+
 # Simulate the race condition
 echo "8. Simulating the race condition..."
 echo "   a. Draining worker node..."
