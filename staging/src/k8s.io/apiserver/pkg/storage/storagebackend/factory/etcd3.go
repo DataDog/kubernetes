@@ -322,7 +322,7 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
       "interval": "2s",
       "base_ejection_time": "30s",
       "max_ejection_time": "300s",
-      "max_ejection_percent": 10,
+      "max_ejection_percent": 50,
       "failure_percentage_ejection": {
         "threshold": 85,
         "enforcement_percentage": 100,
