@@ -360,12 +360,33 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
 	}
 
+	// Configure endpoint strategy for outlier detection:
+	// When multiple etcd endpoints are provided (e.g., via --etcd-servers), aggregate them
+	// into a single gRPC target using our custom resolver. This allows gRPC's outlier detection
+	// to monitor health across all etcd members and automatically eject unhealthy ones.
+	//
+	// Without this, each endpoint would be a separate connection with no cross-endpoint health tracking.
+	endpoints := c.ServerList
+	if len(c.ServerList) > 1 {
+		// Multiple endpoints provided - use custom resolver to enable outlier detection
+		// The custom "etcd:///" resolver will create subchannels to all endpoints,
+		// allowing the outlier_detection load balancer to track and eject unhealthy members
+		aggregatedEndpoint := "etcd:///" + strings.Join(c.ServerList, ",")
+		endpoints = []string{aggregatedEndpoint}
+		klog.Infof("Configured etcd client with outlier detection for %d endpoints: %v",
+			len(c.ServerList), c.ServerList)
+		klog.V(2).Infof("Outlier detection policy: interval=10s, threshold=20%%, base_ejection_time=30s, max_ejection_percent=50%%")
+	} else if len(c.ServerList) == 1 {
+		// Single endpoint - log that outlier detection won't be active
+		klog.V(2).Infof("Using single etcd endpoint (outlier detection not applicable): %s", c.ServerList[0])
+	}
+
 	cfg := clientv3.Config{
 		DialTimeout:          dialTimeout,
 		DialKeepAliveTime:    keepaliveTime,
 		DialKeepAliveTimeout: keepaliveTimeout,
 		DialOptions:          dialOptions,
-		Endpoints:            c.ServerList,
+		Endpoints:            endpoints,
 		TLS:                  tlsConfig,
 		Logger:               etcd3ClientLogger,
 	}
