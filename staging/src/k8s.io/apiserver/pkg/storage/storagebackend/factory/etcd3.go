@@ -360,12 +360,45 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
 	}
 
+	// Configure endpoints for cross-member outlier detection:
+	// Assume the endpoint is a DNS name (e.g., "dns:///etcd.namespace.svc:2379" or just "etcd.namespace.svc:2379").
+	// gRPC's DNS resolver will resolve all IPs for the service and create subchannels to each,
+	// enabling outlier detection to monitor and eject unhealthy members across the etcd cluster.
+	endpoints := c.ServerList
+
+	// If the endpoint doesn't already have a DNS scheme, add it
+	if len(endpoints) == 1 {
+		endpoint := endpoints[0]
+		// Strip any existing scheme
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+		endpoint = strings.TrimPrefix(endpoint, "http://")
+
+		// Add DNS resolver scheme if not already present
+		if !strings.HasPrefix(endpoint, "dns:///") {
+			endpoint = "dns:///" + endpoint
+			endpoints = []string{endpoint}
+			klog.Infof("Configured etcd client with DNS-based cross-member outlier detection: %s", endpoint)
+			klog.V(2).Infof("Outlier detection policy: interval=10s, threshold=20%%, base_ejection_time=30s, max_ejection_percent=50%%")
+		}
+	} else if len(endpoints) > 1 {
+		klog.Warningf("Multiple etcd endpoints provided, but DNS-based outlier detection requires a single DNS name. Using first endpoint only: %s", endpoints[0])
+		endpoint := endpoints[0]
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+		endpoint = strings.TrimPrefix(endpoint, "http://")
+		if !strings.HasPrefix(endpoint, "dns:///") {
+			endpoint = "dns:///" + endpoint
+		}
+		endpoints = []string{endpoint}
+		klog.Infof("Configured etcd client with DNS-based cross-member outlier detection: %s", endpoint)
+		klog.V(2).Infof("Outlier detection policy: interval=10s, threshold=20%%, base_ejection_time=30s, max_ejection_percent=50%%")
+	}
+
 	cfg := clientv3.Config{
 		DialTimeout:          dialTimeout,
 		DialKeepAliveTime:    keepaliveTime,
 		DialKeepAliveTimeout: keepaliveTimeout,
 		DialOptions:          dialOptions,
-		Endpoints:            c.ServerList,
+		Endpoints:            endpoints,
 		TLS:                  tlsConfig,
 		Logger:               etcd3ClientLogger,
 	}
