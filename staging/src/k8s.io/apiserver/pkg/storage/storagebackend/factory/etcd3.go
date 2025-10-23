@@ -360,12 +360,39 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
 	}
 
+	// Configure endpoints for cross-member outlier detection:
+	// When multiple endpoints are provided, wrap them in a DNS-style target that uses
+	// gRPC's passthrough resolver. This allows a single gRPC connection to see all
+	// etcd members as subchannels, enabling outlier detection across the cluster.
+	endpoints := c.ServerList
+	if len(c.ServerList) > 1 {
+		// Create a passthrough resolver target with all endpoints
+		// The passthrough resolver treats the target as a comma-separated list of addresses
+		// Format: "passthrough:///host1:port1,host2:port2,host3:port3"
+		var strippedEndpoints []string
+		for _, endpoint := range c.ServerList {
+			// Remove scheme (https://) since TLS is configured separately
+			stripped := strings.TrimPrefix(endpoint, "https://")
+			stripped = strings.TrimPrefix(stripped, "http://")
+			strippedEndpoints = append(strippedEndpoints, stripped)
+		}
+
+		// Use passthrough resolver which accepts comma-separated addresses
+		aggregatedTarget := "passthrough:///" + strings.Join(strippedEndpoints, ",")
+		endpoints = []string{aggregatedTarget}
+
+		klog.Infof("Configured etcd client with cross-member outlier detection for %d endpoints: %v",
+			len(c.ServerList), c.ServerList)
+		klog.V(2).Infof("Using passthrough resolver target: %s", aggregatedTarget)
+		klog.V(2).Infof("Outlier detection policy: interval=10s, threshold=20%%, base_ejection_time=30s, max_ejection_percent=50%%")
+	}
+
 	cfg := clientv3.Config{
 		DialTimeout:          dialTimeout,
 		DialKeepAliveTime:    keepaliveTime,
 		DialKeepAliveTimeout: keepaliveTimeout,
 		DialOptions:          dialOptions,
-		Endpoints:            c.ServerList,
+		Endpoints:            endpoints,
 		TLS:                  tlsConfig,
 		Logger:               etcd3ClientLogger,
 	}
