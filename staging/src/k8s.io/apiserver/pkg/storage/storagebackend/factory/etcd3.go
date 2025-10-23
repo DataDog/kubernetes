@@ -41,6 +41,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 
+	_ "google.golang.org/grpc/balancer/roundrobin" // enables round_robin child policy
+	_ "google.golang.org/grpc/resolver/dns"        // enables "dns:///" targets
 	_ "google.golang.org/grpc/xds"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
@@ -345,7 +347,47 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		dialOptions = append(dialOptions,
 			grpc.WithStatsHandler(otelgrpc.NewClientHandler(tracingOpts...)))
 	}
-	if egressDialer != nil {
+	// Configure endpoints for cross-member outlier detection:
+	// Assume the endpoint is a DNS name (e.g., "dns:///etcd.namespace.svc:2379" or just "etcd.namespace.svc:2379").
+	// gRPC's DNS resolver will resolve all IPs for the service and create subchannels to each,
+	// enabling outlier detection to monitor and eject unhealthy members across the etcd cluster.
+	endpoints := c.ServerList
+	useDNSResolver := false
+
+	// If the endpoint doesn't already have a DNS scheme, add it
+	if len(endpoints) == 1 {
+		endpoint := endpoints[0]
+		// Strip any existing scheme
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+		endpoint = strings.TrimPrefix(endpoint, "http://")
+
+		// Add DNS resolver scheme if not already present
+		if !strings.HasPrefix(endpoint, "dns:///") {
+			endpoint = "dns:///" + endpoint
+			endpoints = []string{endpoint}
+			useDNSResolver = true
+			klog.Infof("Configured etcd client with DNS-based cross-member outlier detection: %s", endpoint)
+			klog.V(2).Infof("Outlier detection policy: interval=10s, threshold=20%%, base_ejection_time=30s, max_ejection_percent=50%%")
+		}
+	} else if len(endpoints) > 1 {
+		klog.Warningf("Multiple etcd endpoints provided, but DNS-based outlier detection requires a single DNS name. Using first endpoint only: %s", endpoints[0])
+		endpoint := endpoints[0]
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+		endpoint = strings.TrimPrefix(endpoint, "http://")
+		if !strings.HasPrefix(endpoint, "dns:///") {
+			endpoint = "dns:///" + endpoint
+		}
+		endpoints = []string{endpoint}
+		useDNSResolver = true
+		klog.Infof("Configured etcd client with DNS-based cross-member outlier detection: %s", endpoint)
+		klog.V(2).Infof("Outlier detection policy: interval=10s, threshold=20%%, base_ejection_time=30s, max_ejection_percent=50%%")
+	}
+
+	// IMPORTANT: Custom dialers bypass gRPC's resolver system. When using DNS-based resolution
+	// for cross-member outlier detection, we must NOT use a custom dialer because it would
+	// prevent the DNS resolver from resolving the service name to individual etcd member IPs.
+	// The custom dialer is only needed for direct endpoint connections (non-DNS).
+	if egressDialer != nil && !useDNSResolver {
 		dialer := func(ctx context.Context, addr string) (net.Conn, error) {
 			if strings.Contains(addr, "//") {
 				// etcd client prior to 3.5 passed URLs to dialer, normalize to address
@@ -358,6 +400,8 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 			return egressDialer(ctx, "tcp", addr)
 		}
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
+	} else if egressDialer != nil && useDNSResolver {
+		klog.Warningf("Egress dialer is configured but will be skipped for DNS-based outlier detection to allow gRPC DNS resolver to function properly")
 	}
 
 	cfg := clientv3.Config{
@@ -365,7 +409,7 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		DialKeepAliveTime:    keepaliveTime,
 		DialKeepAliveTimeout: keepaliveTimeout,
 		DialOptions:          dialOptions,
-		Endpoints:            c.ServerList,
+		Endpoints:            endpoints,
 		TLS:                  tlsConfig,
 		Logger:               etcd3ClientLogger,
 	}
