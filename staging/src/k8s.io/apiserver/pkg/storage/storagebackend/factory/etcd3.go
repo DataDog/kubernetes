@@ -42,9 +42,11 @@ import (
 	"k8s.io/klog/v2"
 
 	roundrobin "google.golang.org/grpc/balancer/roundrobin" // named import (not blank)
+	_ "google.golang.org/grpc/balancer/weightedroundrobin"
 	"google.golang.org/grpc/resolver"
 	dnsresolver "google.golang.org/grpc/resolver/dns" // named import
 	_ "google.golang.org/grpc/xds"
+	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS Google DirectPath components
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
@@ -101,6 +103,12 @@ func init() {
 	resolver.Register(dnsresolver.NewBuilder())
 	resolver.SetDefaultScheme("dns")
 	_ = roundrobin.Name
+
+	// Enable outlier detection support in gRPC
+	// This is required for outlier_detection load balancing policy to work
+	if os.Getenv("GRPC_EXPERIMENTAL_ENABLE_OUTLIER_DETECTION") == "" {
+		os.Setenv("GRPC_EXPERIMENTAL_ENABLE_OUTLIER_DETECTION", "true")
+	}
 }
 
 // etcdClientDebugLevel translates ETCD_CLIENT_DEBUG into zap log level.
@@ -332,7 +340,7 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		grpc.WithChainStreamInterceptor(grpcprom.StreamClientInterceptor),
 		grpc.WithDefaultServiceConfig(`{
   "loadBalancingConfig": [{
-    "outlier_detection": {
+    "outlier_detection_experimental": {
       "interval": "10s",
       "base_ejection_time": "30s",
       "max_ejection_time": "300s",
@@ -403,7 +411,8 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		klog.Warningf("Egress dialer is configured but will be skipped for DNS-based outlier detection to allow gRPC DNS resolver to function properly")
 	}
 
-	klog.Infof("----------------Creating clientv3.Config")
+	klog.Infof("----------------Creating clientv3.Config with endpoints: %v", endpoints)
+	klog.Infof("Number of DialOptions: %d", len(dialOptions))
 
 	cfg := clientv3.Config{
 		DialTimeout:          dialTimeout,
@@ -415,9 +424,14 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		Logger:               etcd3ClientLogger,
 	}
 
+	klog.Infof("About to call kubernetes.New()")
 	k, err := kubernetes.New(cfg)
+	if err != nil {
+		klog.Errorf("kubernetes.New() failed: %v", err)
+		return nil, err
+	}
 
-	klog.Infof("----------------Created")
+	klog.Infof("----------------Created successfully")
 
 	return k, err
 }
