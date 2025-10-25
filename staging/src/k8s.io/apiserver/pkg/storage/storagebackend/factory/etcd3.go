@@ -42,11 +42,9 @@ import (
 	"k8s.io/klog/v2"
 
 	roundrobin "google.golang.org/grpc/balancer/roundrobin" // named import (not blank)
-	_ "google.golang.org/grpc/balancer/weightedroundrobin"
+	_ "google.golang.org/grpc/health"                       // Register health checking service
 	"google.golang.org/grpc/resolver"
 	dnsresolver "google.golang.org/grpc/resolver/dns" // named import
-	_ "google.golang.org/grpc/xds"
-	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS Google DirectPath components
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
@@ -103,12 +101,6 @@ func init() {
 	resolver.Register(dnsresolver.NewBuilder())
 	resolver.SetDefaultScheme("dns")
 	_ = roundrobin.Name
-
-	// Enable outlier detection support in gRPC
-	// This is required for outlier_detection load balancing policy to work
-	if os.Getenv("GRPC_EXPERIMENTAL_ENABLE_OUTLIER_DETECTION") == "" {
-		os.Setenv("GRPC_EXPERIMENTAL_ENABLE_OUTLIER_DETECTION", "true")
-	}
 }
 
 // etcdClientDebugLevel translates ETCD_CLIENT_DEBUG into zap log level.
@@ -338,22 +330,16 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		// which seems to be what we want as the metrics will be collected on each attempt (retry)
 		grpc.WithChainUnaryInterceptor(grpcprom.UnaryClientInterceptor),
 		grpc.WithChainStreamInterceptor(grpcprom.StreamClientInterceptor),
+		// Use round-robin load balancing with health checking across all etcd endpoints.
+		// The DNS resolver will resolve the service name to individual etcd member IPs,
+		// and round-robin will distribute requests across them. gRPC health checking
+		// will proactively detect soft failures (slow responses, high error rates) in
+		// addition to hard failures detected by TCP keepalives.
 		grpc.WithDefaultServiceConfig(`{
-  "loadBalancingConfig": [{
-    "outlier_detection_experimental": {
-      "interval": "10s",
-      "base_ejection_time": "30s",
-      "max_ejection_time": "300s",
-      "max_ejection_percent": 50,
-      "failure_percentage_ejection": {
-        "threshold": 20,
-        "enforcement_percentage": 100,
-        "minimum_hosts": 3,
-        "request_volume": 5
-      },
-      "child_policy": [{"round_robin": {}}]
-    }
-  }]
+  "loadBalancingConfig": [{"round_robin": {}}],
+  "healthCheckConfig": {
+    "serviceName": ""
+  }
 }`),
 	}
 	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerTracing) && c.TracerProvider != nil {
@@ -367,10 +353,10 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		dialOptions = append(dialOptions,
 			grpc.WithStatsHandler(otelgrpc.NewClientHandler(tracingOpts...)))
 	}
-	// Configure endpoints for cross-member outlier detection:
-	// Assume the endpoint is a DNS name (e.g., "dns:///etcd.namespace.svc:2379" or just "etcd.namespace.svc:2379").
-	// gRPC's DNS resolver will resolve all IPs for the service and create subchannels to each,
-	// enabling outlier detection to monitor and eject unhealthy members across the etcd cluster.
+	// Configure endpoints for DNS-based load balancing:
+	// Use DNS resolution to discover all etcd members. The DNS resolver will resolve the service
+	// name to individual etcd member IPs, and round-robin load balancing will distribute requests
+	// across them. etcd's built-in health checking handles failure detection.
 	endpoints := c.ServerList
 	useDNSResolver := false
 
@@ -390,9 +376,9 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 	}
 
 	// IMPORTANT: Custom dialers bypass gRPC's resolver system. When using DNS-based resolution
-	// for cross-member outlier detection, we must NOT use a custom dialer because it would
-	// prevent the DNS resolver from resolving the service name to individual etcd member IPs.
-	// The custom dialer is only needed for direct endpoint connections (non-DNS).
+	// for load balancing, we must NOT use a custom dialer because it would prevent the DNS
+	// resolver from resolving the service name to individual etcd member IPs. The custom dialer
+	// is only needed for direct endpoint connections (non-DNS).
 	klog.Infof("if egressDialer != nil && !useDNSResolver")
 	if egressDialer != nil && !useDNSResolver {
 		dialer := func(ctx context.Context, addr string) (net.Conn, error) {
@@ -408,7 +394,7 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		}
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
 	} else if egressDialer != nil && useDNSResolver {
-		klog.Warningf("Egress dialer is configured but will be skipped for DNS-based outlier detection to allow gRPC DNS resolver to function properly")
+		klog.Warningf("Egress dialer is configured but will be skipped for DNS-based load balancing to allow gRPC DNS resolver to function properly")
 	}
 
 	klog.Infof("----------------Creating clientv3.Config with endpoints: %v", endpoints)
