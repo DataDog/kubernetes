@@ -39,6 +39,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/grpclog"
 	"k8s.io/klog/v2"
 
 	roundrobin "google.golang.org/grpc/balancer/roundrobin" // named import (not blank)
@@ -101,6 +102,15 @@ func init() {
 	resolver.Register(dnsresolver.NewBuilder())
 	resolver.SetDefaultScheme("dns")
 	_ = roundrobin.Name
+
+	// Enable gRPC logging for debugging health checks and connection state
+	// Check for debug environment variables
+	if os.Getenv("GRPC_GO_LOG_VERBOSITY_LEVEL") != "" || os.Getenv("GRPC_TRACE") != "" {
+		// Enable gRPC logging to stderr
+		grpclog.SetLoggerV2(grpclog.NewLoggerV2(os.Stderr, os.Stderr, os.Stderr))
+		klog.Infof("gRPC debug logging enabled: VERBOSITY=%s TRACE=%s",
+			os.Getenv("GRPC_GO_LOG_VERBOSITY_LEVEL"), os.Getenv("GRPC_TRACE"))
+	}
 }
 
 // etcdClientDebugLevel translates ETCD_CLIENT_DEBUG into zap log level.
@@ -418,6 +428,8 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 	}
 
 	klog.Infof("----------------Created successfully")
+	klog.Infof("etcd client endpoints: %v", k.Endpoints())
+	klog.Infof("Health checking: enabled (serviceName=''), TCP keepalives: time=%v timeout=%v", keepaliveTime, keepaliveTimeout)
 
 	return k, err
 }
