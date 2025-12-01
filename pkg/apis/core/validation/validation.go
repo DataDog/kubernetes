@@ -4993,10 +4993,15 @@ func ValidateNodeFieldSelectorRequirement(req core.NodeSelectorRequirement, fldP
 	allErrs := field.ErrorList{}
 
 	switch req.Operator {
-	case core.NodeSelectorOpIn, core.NodeSelectorOpNotIn:
+	case core.NodeSelectorOpIn:
 		if len(req.Values) != 1 {
 			allErrs = append(allErrs, field.Required(fldPath.Child("values"),
-				"must be only one value when `operator` is 'In' or 'NotIn' for node field selector"))
+				"must be only one value when `operator` is 'In' for node field selector"))
+		}
+	case core.NodeSelectorOpNotIn:
+		if len(req.Values) == 0 {
+			allErrs = append(allErrs, field.Required(fldPath.Child("values"),
+				"must have at least one value when `operator` is 'NotIn' for node field selector"))
 		}
 	default:
 		allErrs = append(allErrs, field.Invalid(fldPath.Child("operator"), req.Operator, "not a valid selector operator"))

@@ -11516,6 +11516,24 @@ func TestValidatePod(t *testing.T) {
 				}),
 			),
 		},
+		"invalid node field selector requirement in node affinity, no values for field selector": {
+			expectedError: "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[0].values",
+			spec: *podtest.MakePod("123",
+				podtest.SetAffinity(&core.Affinity{
+					NodeAffinity: &core.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+							NodeSelectorTerms: []core.NodeSelectorTerm{{
+								MatchFields: []core.NodeSelectorRequirement{{
+									Key:      "metadata.name",
+									Operator: core.NodeSelectorOpNotIn,
+									Values:   []string{},
+								}},
+							}},
+						},
+					},
+				}),
+			),
+		},
 		"invalid node field selector requirement in node affinity, invalid operator": {
 			expectedError: "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[0].operator",
 			spec: *podtest.MakePod("123",

@@ -275,10 +275,14 @@ func nodeSelectorRequirementsAsFieldSelector(nsr []v1.NodeSelectorRequirement, p
 			}
 
 		case v1.NodeSelectorOpNotIn:
-			if len(expr.Values) != 1 {
-				errs = append(errs, field.Invalid(p.Child("values"), expr.Values, "must have one element"))
+			if len(expr.Values) == 0 {
+				errs = append(errs, field.Required(p.Child("values"), "must have at least one element"))
 			} else {
-				selectors = append(selectors, fields.OneTermNotEqualSelector(expr.Key, expr.Values[0]))
+				// NotIn with multiple values is supported because it translates to AND:
+				// key NotIn [v1, v2, v3] -> key!=v1 AND key!=v2 AND key!=v3
+				for _, value := range expr.Values {
+					selectors = append(selectors, fields.OneTermNotEqualSelector(expr.Key, value))
+				}
 			}
 
 		default:

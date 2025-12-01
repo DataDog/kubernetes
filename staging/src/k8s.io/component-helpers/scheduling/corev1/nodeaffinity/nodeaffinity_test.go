@@ -145,6 +145,34 @@ func TestNodeSelectorMatch(t *testing.T) {
 			node:      &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "host_1"}},
 			wantMatch: true,
 		},
+		{
+			name: "field selector NotIn with multiple values - node matches",
+			nodeSelector: v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
+				{
+					MatchFields: []v1.NodeSelectorRequirement{{
+						Key:      "metadata.name",
+						Operator: v1.NodeSelectorOpNotIn,
+						Values:   []string{"excluded_1", "excluded_2", "excluded_3"},
+					}},
+				},
+			}},
+			node:      &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "host_1"}},
+			wantMatch: true,
+		},
+		{
+			name: "field selector NotIn with multiple values - node does not match",
+			nodeSelector: v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
+				{
+					MatchFields: []v1.NodeSelectorRequirement{{
+						Key:      "metadata.name",
+						Operator: v1.NodeSelectorOpNotIn,
+						Values:   []string{"excluded_1", "host_1", "excluded_3"},
+					}},
+				},
+			}},
+			node:      &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "host_1"}},
+			wantMatch: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
