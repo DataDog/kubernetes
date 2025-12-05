@@ -912,6 +912,13 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 				}
 				return cert, nil
 			}
+
+			// GetCertificate is only preferred over the certificate files by
+			// Golang TLS if the ClientHelloInfo.ServerName is set, which it is
+			// not when connecting to a host by IP address. Clear the files to
+			// force the use of GetCertificate.
+			kubeDeps.TLSOptions.CertFile = ""
+			kubeDeps.TLSOptions.KeyFile = ""
 		}
 	}
 
