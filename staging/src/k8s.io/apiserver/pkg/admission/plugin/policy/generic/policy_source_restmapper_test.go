@@ -33,9 +33,9 @@ import (
 
 // fakeResettableRESTMapper simulates a DeferredDiscoveryRESTMapper that was
 // populated with a stale discovery result: RESTMapping fails until Reset() is
-// called, at which point it succeeds. This mirrors the Mode B race condition
-// where the apiserver restarts before the CRD controller finishes
-// re-registering the API group.
+// called, at which point it succeeds. This mirrors the race condition where 
+// the apiserver restarts before the CRD controller finishes re-registering 
+// the API group.
 type fakeResettableRESTMapper struct {
 	mu       sync.Mutex
 	resetted bool
@@ -150,8 +150,7 @@ func newMinimalPolicySource(mapper meta.RESTMapper) *policySource[runtime.Object
 // RESTMapping fails with a fresh-but-stale discovery cache, ensureParamsForPolicyLocked
 // calls Reset() and retries, succeeding on the second attempt.
 //
-// This is the core Fix 3 behavior: the Mode B race window shrinks from ~30s
-// (scheduled ticker) to ~1-5s (time for CRD re-registration).
+// The race window shrinks from ~30s (scheduled ticker) to ~1-5s (time for CRD re-registration).
 func TestEnsureParamsForPolicyLocked_RESTMapperResetOnMiss(t *testing.T) {
 	mapper := &fakeResettableRESTMapper{}
 	s := newMinimalPolicySource(mapper)
