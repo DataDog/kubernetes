@@ -921,8 +921,8 @@ func (m *manager) updateStatusInternal(logger klog.Logger, pod *v1.Pod, status v
 		default:
 		}
 	} else {
-		metrics.PodStatusBatchPending.Set(float64(len(m.batcher.timers)))
 		m.batcher.Schedule(pod.UID)
+		metrics.PodStatusBatchPending.Set(float64(m.batcher.PendingCount()))
 	}
 }
 
@@ -946,6 +946,9 @@ func (m *manager) deletePodStatus(uid types.UID) {
 	m.podStatusesLock.Lock()
 	defer m.podStatusesLock.Unlock()
 	delete(m.podStatuses, uid)
+	if m.batcher != nil {
+		m.batcher.Cancel(uid)
+	}
 	m.podStartupLatencyHelper.DeletePodStartupState(uid)
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		if _, exists := m.podResizeConditions[uid]; exists {

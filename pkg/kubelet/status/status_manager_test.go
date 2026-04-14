@@ -2800,7 +2800,7 @@ func TestBatchingBypassOnPodBecomingReady(t *testing.T) {
 	m.SetPodStatus(logger, pod, ready)
 
 	numUpdates := m.consumeUpdates(ctx)
-	assert.Greater(t, numUpdates, 0, "PodReady transition should bypass batching")
+	assert.Equal(t, 1, numUpdates, "PodReady transition should bypass batching")
 }
 
 func TestBatchingBypassOnPodBecomingUnready(t *testing.T) {
@@ -2830,7 +2830,7 @@ func TestBatchingBypassOnPodBecomingUnready(t *testing.T) {
 	m.SetPodStatus(logger, pod, notReady)
 
 	numUpdates := m.consumeUpdates(ctx)
-	assert.Greater(t, numUpdates, 0, "PodReady→False should bypass batching")
+	assert.Equal(t, 1, numUpdates, "PodReady→False should bypass batching")
 }
 
 func TestBatchingBypassOnTerminalPhase(t *testing.T) {
@@ -2847,7 +2847,7 @@ func TestBatchingBypassOnTerminalPhase(t *testing.T) {
 	m.SetPodStatus(logger, pod, status)
 
 	numUpdates := m.consumeUpdates(ctx)
-	assert.Greater(t, numUpdates, 0, "terminal phase should bypass batching")
+	assert.Equal(t, 1, numUpdates, "terminal phase should bypass batching")
 }
 
 func TestBatchingBypassOnForceUpdate(t *testing.T) {
@@ -2863,7 +2863,7 @@ func TestBatchingBypassOnForceUpdate(t *testing.T) {
 	m.SetPodStatus(logger, pod, status)
 
 	numUpdates := m.consumeUpdates(ctx)
-	assert.Greater(t, numUpdates, 0, "forceUpdate (DeletionTimestamp) should bypass batching")
+	assert.Equal(t, 1, numUpdates, "forceUpdate (DeletionTimestamp) should bypass batching")
 }
 
 func TestBatchingDisabledWithZeroWindow(t *testing.T) {

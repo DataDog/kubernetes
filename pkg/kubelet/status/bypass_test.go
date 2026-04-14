@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,100 +24,102 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-func podStatusWithReady(status v1.ConditionStatus) v1.PodStatus {
-	return v1.PodStatus{
-		Conditions: []v1.PodCondition{
-			{Type: v1.PodReady, Status: status},
-		},
-	}
+func podStatusWithConditions(conditions ...v1.PodCondition) v1.PodStatus {
+	return v1.PodStatus{Conditions: conditions}
 }
 
 func podStatusWithPhase(phase v1.PodPhase) v1.PodStatus {
 	return v1.PodStatus{Phase: phase}
 }
 
-func TestShouldBypass_ForceUpdate(t *testing.T) {
-	old := v1.PodStatus{}
-	new := v1.PodStatus{}
-	assert.True(t, shouldBypass(true, &old, &new), "forceUpdate=true should always bypass")
-}
-
-func TestShouldBypass_NoChange(t *testing.T) {
-	old := podStatusWithReady(v1.ConditionFalse)
-	new := podStatusWithReady(v1.ConditionFalse)
-	assert.False(t, shouldBypass(false, &old, &new), "no change should not bypass")
-}
-
-func TestShouldBypass_PodBecameReady(t *testing.T) {
-	old := podStatusWithReady(v1.ConditionFalse)
-	new := podStatusWithReady(v1.ConditionTrue)
-	assert.True(t, shouldBypass(false, &old, &new), "PodReady False→True should bypass")
-}
-
-func TestShouldBypass_PodBecameUnready(t *testing.T) {
-	old := podStatusWithReady(v1.ConditionTrue)
-	new := podStatusWithReady(v1.ConditionFalse)
-	assert.True(t, shouldBypass(false, &old, &new), "PodReady True→False should bypass")
-}
-
-func TestShouldBypass_PodReadyFromUnknown(t *testing.T) {
-	old := podStatusWithReady(v1.ConditionUnknown)
-	new := podStatusWithReady(v1.ConditionTrue)
-	assert.True(t, shouldBypass(false, &old, &new), "PodReady Unknown→True should bypass")
-}
-
-func TestShouldBypass_PodReadyFirstReport(t *testing.T) {
-	old := v1.PodStatus{}
-	new := podStatusWithReady(v1.ConditionTrue)
-	assert.True(t, shouldBypass(false, &old, &new), "first report with PodReady=True should bypass")
-}
-
-func TestShouldBypass_PodReadyFirstReportNotReady(t *testing.T) {
-	old := v1.PodStatus{}
-	new := podStatusWithReady(v1.ConditionFalse)
-	// First report with PodReady=False — old has no PodReady condition (implicitly not-ready).
-	// No transition occurred, so no bypass.
-	assert.False(t, shouldBypass(false, &old, &new), "first report with PodReady=False should not bypass (no transition)")
-}
-
-func TestShouldBypass_PodReadyUnchangedTrue(t *testing.T) {
-	old := podStatusWithReady(v1.ConditionTrue)
-	new := podStatusWithReady(v1.ConditionTrue)
-	assert.False(t, shouldBypass(false, &old, &new), "PodReady unchanged (True→True) should not bypass")
-}
-
-func TestShouldBypass_TerminalPhaseFailed(t *testing.T) {
-	old := podStatusWithPhase(v1.PodRunning)
-	new := podStatusWithPhase(v1.PodFailed)
-	assert.True(t, shouldBypass(false, &old, &new), "phase transition to Failed should bypass")
-}
-
-func TestShouldBypass_TerminalPhaseSucceeded(t *testing.T) {
-	old := podStatusWithPhase(v1.PodRunning)
-	new := podStatusWithPhase(v1.PodSucceeded)
-	assert.True(t, shouldBypass(false, &old, &new), "phase transition to Succeeded should bypass")
-}
-
-func TestShouldBypass_TerminalPhaseAlreadyTerminal(t *testing.T) {
-	old := podStatusWithPhase(v1.PodFailed)
-	new := podStatusWithPhase(v1.PodFailed)
-	assert.False(t, shouldBypass(false, &old, &new), "unchanged terminal phase should not bypass")
-}
-
-func TestShouldBypass_NonTerminalPhaseChange(t *testing.T) {
-	old := podStatusWithPhase(v1.PodPending)
-	new := podStatusWithPhase(v1.PodRunning)
-	assert.False(t, shouldBypass(false, &old, &new), "Pending→Running should not bypass")
-}
-
-func TestShouldBypass_CombinedReadyAndTerminal(t *testing.T) {
-	old := v1.PodStatus{
-		Phase:      v1.PodRunning,
-		Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+func TestShouldBypass(t *testing.T) {
+	ready := func(s v1.ConditionStatus) v1.PodCondition {
+		return v1.PodCondition{Type: v1.PodReady, Status: s}
 	}
-	new := v1.PodStatus{
-		Phase:      v1.PodFailed,
-		Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}},
+	containersReady := func(s v1.ConditionStatus) v1.PodCondition {
+		return v1.PodCondition{Type: v1.ContainersReady, Status: s}
 	}
-	assert.True(t, shouldBypass(false, &old, &new), "both readiness change and terminal phase should bypass")
+
+	tests := []struct {
+		name        string
+		forceUpdate bool
+		old, new    v1.PodStatus
+		want        bool
+	}{
+		{name: "force update always bypasses", forceUpdate: true, want: true},
+
+		{name: "no change", old: podStatusWithConditions(ready(v1.ConditionFalse)), new: podStatusWithConditions(ready(v1.ConditionFalse)), want: false},
+
+		{name: "PodReady False→True", old: podStatusWithConditions(ready(v1.ConditionFalse)), new: podStatusWithConditions(ready(v1.ConditionTrue)), want: true},
+		{name: "PodReady True→False", old: podStatusWithConditions(ready(v1.ConditionTrue)), new: podStatusWithConditions(ready(v1.ConditionFalse)), want: true},
+		{name: "PodReady Unknown→True", old: podStatusWithConditions(ready(v1.ConditionUnknown)), new: podStatusWithConditions(ready(v1.ConditionTrue)), want: true},
+		{name: "PodReady first report True", old: v1.PodStatus{}, new: podStatusWithConditions(ready(v1.ConditionTrue)), want: true},
+		{name: "PodReady first report False is no transition", old: v1.PodStatus{}, new: podStatusWithConditions(ready(v1.ConditionFalse)), want: false},
+		{name: "PodReady unchanged True", old: podStatusWithConditions(ready(v1.ConditionTrue)), new: podStatusWithConditions(ready(v1.ConditionTrue)), want: false},
+
+		{name: "ContainersReady False→True", old: podStatusWithConditions(containersReady(v1.ConditionFalse)), new: podStatusWithConditions(containersReady(v1.ConditionTrue)), want: true},
+		{name: "ContainersReady True→False", old: podStatusWithConditions(containersReady(v1.ConditionTrue)), new: podStatusWithConditions(containersReady(v1.ConditionFalse)), want: true},
+		{name: "ContainersReady unchanged", old: podStatusWithConditions(containersReady(v1.ConditionTrue)), new: podStatusWithConditions(containersReady(v1.ConditionTrue)), want: false},
+
+		// Missing conditions default to ConditionFalse: removal of a True condition
+		// is observed as True→False and must bypass.
+		{name: "PodReady removed from conditions", old: podStatusWithConditions(ready(v1.ConditionTrue)), new: v1.PodStatus{}, want: true},
+		{name: "ContainersReady removed from conditions", old: podStatusWithConditions(containersReady(v1.ConditionTrue)), new: v1.PodStatus{}, want: true},
+
+		{name: "phase Running→Failed", old: podStatusWithPhase(v1.PodRunning), new: podStatusWithPhase(v1.PodFailed), want: true},
+		{name: "phase Running→Succeeded", old: podStatusWithPhase(v1.PodRunning), new: podStatusWithPhase(v1.PodSucceeded), want: true},
+		{name: "phase already terminal", old: podStatusWithPhase(v1.PodFailed), new: podStatusWithPhase(v1.PodFailed), want: false},
+		{name: "phase Pending→Running (non-terminal)", old: podStatusWithPhase(v1.PodPending), new: podStatusWithPhase(v1.PodRunning), want: false},
+		// Rule is "new phase is terminal", not "transitioned into terminal":
+		// backward transitions do not bypass; terminal→terminal changes do.
+		{name: "phase Failed→Running (backward)", old: podStatusWithPhase(v1.PodFailed), new: podStatusWithPhase(v1.PodRunning), want: false},
+		{name: "phase Failed→Succeeded (terminal→terminal)", old: podStatusWithPhase(v1.PodFailed), new: podStatusWithPhase(v1.PodSucceeded), want: true},
+
+		{
+			name: "readiness change and terminal phase combined",
+			old:  v1.PodStatus{Phase: v1.PodRunning, Conditions: []v1.PodCondition{ready(v1.ConditionTrue)}},
+			new:  v1.PodStatus{Phase: v1.PodFailed, Conditions: []v1.PodCondition{ready(v1.ConditionFalse)}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldBypass(tt.forceUpdate, &tt.old, &tt.new))
+		})
+	}
+}
+
+func TestBypassReason(t *testing.T) {
+	tests := []struct {
+		name        string
+		forceUpdate bool
+		old, new    v1.PodStatus
+		want        string
+	}{
+		{"force", true, v1.PodStatus{}, v1.PodStatus{}, "force"},
+		{"ready", false,
+			podStatusWithConditions(v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse}),
+			podStatusWithConditions(v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue}),
+			"ready"},
+		{"containers_ready", false,
+			podStatusWithConditions(v1.PodCondition{Type: v1.ContainersReady, Status: v1.ConditionFalse}),
+			podStatusWithConditions(v1.PodCondition{Type: v1.ContainersReady, Status: v1.ConditionTrue}),
+			"ready"},
+		{"terminal", false,
+			podStatusWithPhase(v1.PodRunning),
+			podStatusWithPhase(v1.PodFailed),
+			"terminal"},
+		// Ordering contract: when both readiness and phase-terminal fire,
+		// reason is "ready" (switch in bypassReason evaluates ready first).
+		{"ready wins over terminal", false,
+			v1.PodStatus{Phase: v1.PodRunning, Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}}},
+			v1.PodStatus{Phase: v1.PodFailed, Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}}},
+			"ready"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, bypassReason(tt.forceUpdate, &tt.old, &tt.new))
+		})
+	}
 }
