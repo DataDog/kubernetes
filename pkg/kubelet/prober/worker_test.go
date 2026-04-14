@@ -36,6 +36,7 @@ import (
 	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/probe"
 	"k8s.io/kubernetes/test/utils/ktesting"
+	"k8s.io/utils/clock"
 )
 
 func init() {
@@ -174,7 +175,7 @@ func TestDoProbe(t *testing.T) {
 				t.Errorf("[%s-%d] Expected result: %v but got %v", probeType, i, test.expectedResult, result)
 			}
 
-			m.statusManager = status.NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, kubeletutil.NewPodStartupLatencyTracker())
+			m.statusManager = status.NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, kubeletutil.NewPodStartupLatencyTracker(), clock.RealClock{}, 0)
 			resultsManager(m, probeType).Remove(testContainerID)
 		}
 	}

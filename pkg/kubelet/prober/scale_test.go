@@ -37,6 +37,7 @@ import (
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
 	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/test/utils/ktesting"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 )
 
@@ -84,7 +85,7 @@ func TestTCPPortExhaustion(t *testing.T) {
 			podManager := kubepod.NewBasicPodManager()
 			podStartupLatencyTracker := kubeletutil.NewPodStartupLatencyTracker()
 			m := NewManager(
-				status.NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker),
+				status.NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, clock.RealClock{}, 0),
 				results.NewManager(),
 				results.NewManager(),
 				results.NewManager(),

@@ -31,6 +31,7 @@ import (
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
 	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/probe"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/exec"
 )
 
@@ -157,7 +158,7 @@ func newTestManager() *manager {
 	// Add test pod to pod manager, so that status manager can get the pod from pod manager if needed.
 	podManager.AddPod(getTestPod())
 	m := NewManager(
-		status.NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker),
+		status.NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, clock.RealClock{}, 0),
 		results.NewManager(),
 		results.NewManager(),
 		results.NewManager(),

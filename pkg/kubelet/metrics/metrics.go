@@ -177,6 +177,12 @@ const (
 	PodInProgressResizesKey          = "pod_in_progress_resizes"
 	PodDeferredAcceptedResizesKey    = "pod_deferred_accepted_resizes_total"
 
+	// Metric keys for pod status batching.
+	PodStatusBatchCoalescedKey  = "pod_status_batch_coalesced_total"
+	PodStatusBatchDelayKey      = "pod_status_batch_delay_seconds"
+	PodStatusBatchPendingKey    = "pod_status_batch_pending_pods"
+	PodStatusBatchBypassKey     = "pod_status_batch_bypass_total"
+
 	// Metric key for podcertificate states.
 	PodCertificateStatesKey = "podcertificate_states"
 )
@@ -1193,6 +1199,44 @@ var (
 		},
 		[]string{"retry_trigger"},
 	)
+
+	PodStatusBatchCoalesced = metrics.NewCounter(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchCoalescedKey,
+			Help:           "Number of intermediate pod status updates absorbed by batching.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchDelay = metrics.NewHistogram(
+		&metrics.HistogramOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchDelayKey,
+			Help:           "Actual delay in seconds from the first pending status change to the batch flush.",
+			Buckets:        []float64{0.1, 0.25, 0.5, 1, 2, 3, 5},
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchPending = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchPendingKey,
+			Help:           "Number of pods with unflushed batched status updates.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchBypass = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchBypassKey,
+			Help:           "Number of pod status updates that bypassed batching.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"reason"},
+	)
 )
 
 var registerMetrics sync.Once
@@ -1301,6 +1345,13 @@ func Register() {
 			legacyregistry.MustRegister(ImageVolumeRequestedTotal)
 			legacyregistry.MustRegister(ImageVolumeMountedSucceedTotal)
 			legacyregistry.MustRegister(ImageVolumeMountedErrorsTotal)
+		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+			legacyregistry.MustRegister(PodStatusBatchCoalesced)
+			legacyregistry.MustRegister(PodStatusBatchDelay)
+			legacyregistry.MustRegister(PodStatusBatchPending)
+			legacyregistry.MustRegister(PodStatusBatchBypass)
 		}
 
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
