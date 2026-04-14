@@ -737,13 +737,13 @@ const (
 	//
 	// Enables reporting of PodReadyToStartContainersCondition condition in pod status after pod
 	// sandbox creation and network configuration completes successfully
+	PodReadyToStartContainersCondition featuregate.Feature = "PodReadyToStartContainersCondition"
+
 	// owner: @bob
 	//
 	// Enables batching of pod status updates within a configurable time window
 	// to reduce API server and etcd load.
 	PodStatusBatchUpdates featuregate.Feature = "PodStatusBatchUpdates"
-
-	PodReadyToStartContainersCondition featuregate.Feature = "PodReadyToStartContainersCondition"
 
 	// owner: @Huang-Wei
 	// kep: https://kep.k8s.io/3521

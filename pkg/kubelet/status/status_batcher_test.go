@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -54,7 +54,6 @@ func TestBatcherScheduleCoalesces(t *testing.T) {
 	// Window is 1s + up to 200ms jitter, so step 1.3s to be safe.
 	fakeClock.Step(1300 * time.Millisecond)
 
-	// AfterFunc callbacks run in goroutines — give them a moment.
 	require.Eventually(t, func() bool {
 		return notifyCount.Load() == 1
 	}, time.Second, 10*time.Millisecond, "exactly one notification after window expires")
@@ -106,7 +105,7 @@ func TestBatcherMaxCoalesceCap(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return notifyCount.Load() >= 1
+		return notifyCount.Load() == 1
 	}, time.Second, 10*time.Millisecond, "notification should fire due to max coalesce cap (3x window)")
 }
 
@@ -145,10 +144,8 @@ func TestBatcherCancel(t *testing.T) {
 	b.Schedule(uid)
 	b.Cancel(uid)
 
-	fakeClock.Step(2 * time.Second)
-
-	// Give any goroutine time to fire (it shouldn't).
-	time.Sleep(50 * time.Millisecond)
+	// Timer should be removed — no waiters.
+	assert.Equal(t, 0, fakeClock.Waiters(), "cancelled timer should have no waiters")
 	assert.Equal(t, int32(0), notifyCount.Load(), "Cancel should prevent notification")
 
 	b.mu.Lock()
@@ -198,10 +195,7 @@ func TestBatcherFlushOneCancelOther(t *testing.T) {
 	b.Cancel(uid2)
 
 	assert.Equal(t, int32(1), notifyCount.Load(), "only flush should notify")
-
-	fakeClock.Step(2 * time.Second)
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, int32(1), notifyCount.Load(), "cancelled pod should not notify")
+	assert.Equal(t, 0, fakeClock.Waiters(), "all timers should be gone")
 }
 
 func TestBatcherDisabledWhenZeroWindow(t *testing.T) {
@@ -218,8 +212,6 @@ func TestBatcherJitterRange(t *testing.T) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
 	window := 1 * time.Second
 
-	// Run multiple rounds and verify the timer always fires
-	// within [window, window + 0.2*window] = [1s, 1.2s].
 	for i := 0; i < 10; i++ {
 		notifyCount := &atomic.Int32{}
 		b := newStatusBatcher(fakeClock, window, func() {
@@ -229,11 +221,66 @@ func TestBatcherJitterRange(t *testing.T) {
 		uid := types.UID("pod-jitter")
 		b.Schedule(uid)
 
-		// Advancing by exactly 1s should not always trigger (jitter adds 0-200ms).
-		// But advancing by 1.2s should always trigger.
-		fakeClock.Step(1200 * time.Millisecond)
+		// Window + max jitter = 1s + 200ms = 1.2s. Step 1.3s to be safe.
+		fakeClock.Step(1300 * time.Millisecond)
 		require.Eventually(t, func() bool {
 			return notifyCount.Load() == 1
 		}, time.Second, 10*time.Millisecond, "timer should fire within jitter range (iteration %d)", i)
 	}
+}
+
+func TestBatcherPendingCount(t *testing.T) {
+	b, _, _ := newTestBatcher(t, 1*time.Second)
+
+	assert.Equal(t, 0, b.PendingCount())
+
+	b.Schedule(types.UID("pod-1"))
+	assert.Equal(t, 1, b.PendingCount())
+
+	b.Schedule(types.UID("pod-2"))
+	assert.Equal(t, 2, b.PendingCount())
+
+	b.Cancel(types.UID("pod-1"))
+	assert.Equal(t, 1, b.PendingCount())
+
+	b.Flush(types.UID("pod-2"))
+	assert.Equal(t, 0, b.PendingCount())
+}
+
+func TestBatcherScheduleAfterCancel(t *testing.T) {
+	b, fakeClock, notifyCount := newTestBatcher(t, 1*time.Second)
+
+	uid := types.UID("pod-1")
+
+	b.Schedule(uid)
+	b.Cancel(uid)
+	assert.Equal(t, int32(0), notifyCount.Load())
+
+	// Schedule again — should create a fresh timer.
+	b.Schedule(uid)
+	assert.Equal(t, 1, fakeClock.Waiters(), "new timer should be active")
+
+	fakeClock.Step(1300 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return notifyCount.Load() == 1
+	}, time.Second, 10*time.Millisecond, "new timer should fire")
+}
+
+func TestBatcherScheduleAfterFlush(t *testing.T) {
+	b, fakeClock, notifyCount := newTestBatcher(t, 1*time.Second)
+
+	uid := types.UID("pod-1")
+
+	b.Schedule(uid)
+	b.Flush(uid)
+	assert.Equal(t, int32(1), notifyCount.Load())
+
+	// Schedule again — should create a fresh timer with fresh firstChange.
+	b.Schedule(uid)
+	assert.Equal(t, 1, fakeClock.Waiters())
+
+	fakeClock.Step(1300 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return notifyCount.Load() == 2
+	}, time.Second, 10*time.Millisecond, "second timer should fire independently")
 }
