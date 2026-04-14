@@ -45,6 +45,7 @@ import (
 	kubeutil "k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/kubelet/util/format"
 	statusutil "k8s.io/kubernetes/pkg/util/pod"
+	"k8s.io/utils/clock"
 )
 
 // A wrapper around v1.PodStatus that includes a version to enforce that stale pod statuses are
@@ -80,6 +81,10 @@ type manager struct {
 	podDeletionSafety PodDeletionSafetyProvider
 
 	podStartupLatencyHelper PodStartupLatencyStateHelper
+
+	// batcher debounces pod status updates within a time window.
+	// nil when PodStatusBatchUpdates feature gate is disabled (batchWindow == 0).
+	batcher *statusBatcher
 }
 
 type podResizeConditions struct {
@@ -185,6 +190,10 @@ type Manager interface {
 	// BackfillPodResizeConditions backfills the status manager's resize conditions by reading them from the
 	// provided pods' statuses.
 	BackfillPodResizeConditions(pods []*v1.Pod)
+
+	// EnableBatching turns on debounced pod status updates with the given window.
+	// A non-positive batchWindow is a no-op (batching stays disabled).
+	EnableBatching(clk clock.WithDelayedExecution, batchWindow time.Duration)
 }
 
 const syncPeriod = 10 * time.Second
@@ -201,6 +210,21 @@ func NewManager(kubeClient clientset.Interface, podManager PodManager, podDeleti
 		podDeletionSafety:       podDeletionSafety,
 		podStartupLatencyHelper: podStartupLatencyHelper,
 	}
+}
+
+// EnableBatching turns on debounced pod status updates with the given window.
+// A non-positive batchWindow is a no-op (batching stays disabled).
+func (m *manager) EnableBatching(clk clock.WithDelayedExecution, batchWindow time.Duration) {
+	if batchWindow <= 0 {
+		return
+	}
+	ch := m.podStatusChannel
+	m.batcher = newStatusBatcher(clk, batchWindow, func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	})
 }
 
 // isPodStatusByKubeletEqual returns true if the given pod statuses are equal when non-kubelet-owned
@@ -896,10 +920,19 @@ func (m *manager) updateStatusInternal(logger klog.Logger, pod *v1.Pod, status v
 
 	m.podStatuses[pod.UID] = newStatus
 
-	select {
-	case m.podStatusChannel <- struct{}{}:
-	default:
-		// there's already a status update pending
+	if m.batcher == nil || shouldBypass(forceUpdate, &oldStatus, &status) {
+		if m.batcher != nil {
+			m.batcher.Cancel(pod.UID)
+			reason := bypassReason(forceUpdate, &oldStatus, &status)
+			metrics.PodStatusBatchBypass.WithLabelValues(reason).Inc()
+		}
+		select {
+		case m.podStatusChannel <- struct{}{}:
+		default:
+		}
+	} else {
+		metrics.PodStatusBatchPending.Set(float64(len(m.batcher.timers)))
+		m.batcher.Schedule(pod.UID)
 	}
 }
 
@@ -941,6 +974,9 @@ func (m *manager) RemoveOrphanedStatuses(logger klog.Logger, podUIDs map[types.U
 		if _, ok := podUIDs[key]; !ok {
 			logger.V(5).Info("Removing pod from status map", "podUID", key)
 			delete(m.podStatuses, key)
+			if m.batcher != nil {
+				m.batcher.Cancel(key)
+			}
 			if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 				if _, exists := m.podResizeConditions[key]; exists {
 					delete(m.podResizeConditions, key)
