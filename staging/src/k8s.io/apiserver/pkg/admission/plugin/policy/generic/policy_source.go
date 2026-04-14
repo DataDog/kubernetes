@@ -407,6 +407,7 @@ func (s *policySource[P, B, E]) ensureParamsForPolicyLocked(paramSource *schema.
 		// return below, preserving the existing rate-limited retry behavior.
 		type resettable interface{ Reset() }
 		if r, ok := s.restMapper.(resettable); ok {
+			klog.V(4).Infof("RESTMapper cache miss for paramKind %v; invalidating and retrying", *paramSource)
 			r.Reset()
 			mapping, err = s.restMapper.RESTMapping(schema.GroupKind{
 				Group: paramSource.Group,
