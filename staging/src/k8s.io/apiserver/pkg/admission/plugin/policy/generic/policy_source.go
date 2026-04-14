@@ -395,8 +395,30 @@ func (s *policySource[P, B, E]) ensureParamsForPolicyLocked(paramSource *schema.
 	}, paramSource.Version)
 
 	if err != nil {
-		// Failed to resolve. Return error so we retry again (rate limited)
-		// Save a record of this definition with an evaluator that unconditionally
+		// RESTMapper cache miss. The CRD may exist but not yet be reflected in
+		// the discovery cache (~30s refresh cycle). This happens after an apiserver
+		// restart if the CRD controller has not finished re-registering the API
+		// group before the discovery cache was last populated. In that case the
+		// cache is marked "fresh" and the built-in retry inside
+		// DeferredDiscoveryRESTMapper does not fire.
+		//
+		// Invalidate the cache and retry once. If the CRD genuinely does not
+		// exist, the second call will also fail and we fall through to the error
+		// return below, preserving the existing rate-limited retry behavior.
+		type resettable interface{ Reset() }
+		if r, ok := s.restMapper.(resettable); ok {
+			klog.V(4).Infof("RESTMapper cache miss for paramKind %v; invalidating and retrying", *paramSource)
+			r.Reset()
+			mapping, err = s.restMapper.RESTMapping(schema.GroupKind{
+				Group: paramSource.Group,
+				Kind:  paramSource.Kind,
+			}, paramSource.Version)
+		}
+	}
+
+	if err != nil {
+		// Failed to resolve after cache invalidation. Return error so we retry
+		// again (rate limited).
 		return nil, nil, fmt.Errorf("failed to find resource referenced by paramKind: '%v'", *paramSource)
 	}
 
