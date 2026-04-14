@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ limitations under the License.
 package status
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -27,6 +27,9 @@ import (
 	"k8s.io/utils/clock"
 )
 
+// statusBatcher debounces pod status updates within a configurable time window.
+// Lock ordering: callers must acquire podStatusesLock before batcher.mu if both
+// are needed. The timer callback only acquires batcher.mu.
 type statusBatcher struct {
 	clock  clock.WithDelayedExecution
 	window time.Duration
@@ -46,6 +49,14 @@ func newStatusBatcher(c clock.WithDelayedExecution, window time.Duration, notify
 		firstChange: make(map[types.UID]time.Time),
 		notify:      notify,
 	}
+}
+
+// PendingCount returns the number of pods with pending batched updates.
+// Safe to call from any goroutine.
+func (b *statusBatcher) PendingCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.timers)
 }
 
 func (b *statusBatcher) Schedule(uid types.UID) {
@@ -68,14 +79,22 @@ func (b *statusBatcher) Schedule(uid types.UID) {
 		b.firstChange[uid] = now
 	}
 
-	delay := b.window + time.Duration(rand.Int63n(int64(b.window/5)))
+	delay := b.window + time.Duration(rand.Int64N(int64(b.window/5)))
 
 	if t, ok := b.timers[uid]; ok {
-		t.Reset(delay)
-		metrics.PodStatusBatchCoalesced.Inc()
-		return
+		if !t.Reset(delay) {
+			// Timer already fired — callback is in-flight or completed.
+			// Delete stale entry and create a fresh timer.
+			delete(b.timers, uid)
+		} else {
+			metrics.PodStatusBatchCoalesced.Inc()
+			return
+		}
 	}
 
+	// Capture firstChange for the delay metric. This intentionally captures
+	// the original first-change time, not the reset time, so the histogram
+	// measures total delay from the first pending change.
 	firstChange := b.firstChange[uid]
 	b.timers[uid] = b.clock.AfterFunc(delay, func() {
 		b.mu.Lock()
@@ -87,6 +106,7 @@ func (b *statusBatcher) Schedule(uid types.UID) {
 		metrics.PodStatusBatchPending.Set(float64(pending))
 		b.notify()
 	})
+	metrics.PodStatusBatchCoalesced.Inc()
 }
 
 func (b *statusBatcher) Flush(uid types.UID) {
@@ -118,7 +138,10 @@ func shouldBypass(forceUpdate bool, old, new *v1.PodStatus) bool {
 	if forceUpdate {
 		return true
 	}
-	if podReadyChanged(old, new) {
+	if conditionChanged(old, new, v1.PodReady) {
+		return true
+	}
+	if conditionChanged(old, new, v1.ContainersReady) {
 		return true
 	}
 	if phaseIsTerminal(old, new) {
@@ -127,15 +150,13 @@ func shouldBypass(forceUpdate bool, old, new *v1.PodStatus) bool {
 	return false
 }
 
-func podReadyChanged(old, new *v1.PodStatus) bool {
-	oldReady := getPodReadyStatus(old)
-	newReady := getPodReadyStatus(new)
-	return oldReady != newReady
+func conditionChanged(old, new *v1.PodStatus, condType v1.PodConditionType) bool {
+	return getConditionStatus(old, condType) != getConditionStatus(new, condType)
 }
 
-func getPodReadyStatus(status *v1.PodStatus) v1.ConditionStatus {
+func getConditionStatus(status *v1.PodStatus, condType v1.PodConditionType) v1.ConditionStatus {
 	for _, c := range status.Conditions {
-		if c.Type == v1.PodReady {
+		if c.Type == condType {
 			return c.Status
 		}
 	}
@@ -146,7 +167,7 @@ func bypassReason(forceUpdate bool, old, new *v1.PodStatus) string {
 	if forceUpdate {
 		return "force"
 	}
-	if podReadyChanged(old, new) {
+	if conditionChanged(old, new, v1.PodReady) || conditionChanged(old, new, v1.ContainersReady) {
 		return "ready"
 	}
 	if phaseIsTerminal(old, new) {
