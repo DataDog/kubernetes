@@ -738,6 +738,7 @@ func autoConvert_v1beta1_KubeletConfiguration_To_config_KubeletConfiguration(in 
 	if err := Convert_v1beta1_CrashLoopBackOffConfig_To_config_CrashLoopBackOffConfig(&in.CrashLoopBackOff, &out.CrashLoopBackOff, s); err != nil {
 		return err
 	}
+	out.PodStatusUpdateBatchWindow = in.PodStatusUpdateBatchWindow
 	out.ReservedMemory = *(*[]config.MemoryReservation)(unsafe.Pointer(&in.ReservedMemory))
 	if err := v1.Convert_Pointer_bool_To_bool(&in.EnableProfilingHandler, &out.EnableProfilingHandler, s); err != nil {
 		return err
@@ -968,6 +969,7 @@ func autoConvert_config_KubeletConfiguration_To_v1beta1_KubeletConfiguration(in 
 	if err := Convert_config_CrashLoopBackOffConfig_To_v1beta1_CrashLoopBackOffConfig(&in.CrashLoopBackOff, &out.CrashLoopBackOff, s); err != nil {
 		return err
 	}
+	out.PodStatusUpdateBatchWindow = in.PodStatusUpdateBatchWindow
 	out.UserNamespaces = (*configv1beta1.UserNamespaces)(unsafe.Pointer(in.UserNamespaces))
 	return nil
 }
