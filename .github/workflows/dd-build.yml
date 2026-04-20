@@ -18,7 +18,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
       with:
         go-version: 1.26
     - name: Set env
@@ -50,7 +50,7 @@ jobs:
         do
           sha256sum "$TARGET_FILE" > "${TARGET_FILE}.sha256sum"
         done
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: k8s_output_${{ env.SANITIZED_TARGET_PLATFORM }}
         path: _output/release-tars
@@ -73,7 +73,7 @@ jobs:
       if: startsWith(github.ref, 'refs/heads/')
     - name: Create Release for Branch
       id: create_release_branch
-      uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
       if: startsWith(github.ref, 'refs/heads/')
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,7 +92,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
     - name: Create Release for Tags
       id: create_release_tags
-      uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
       if: ${{ startsWith(github.ref, 'refs/tags/') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
