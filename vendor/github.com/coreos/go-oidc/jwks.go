@@ -109,7 +109,7 @@ func (r *remoteKeySet) verify(ctx context.Context, jws *jose.JSONWebSignature) (
 		break
 	}
 
-	keys, expiry := r.keysFromCache()
+	keys, _ := r.keysFromCache()
 
 	// Don't check expiry yet. This optimizes for when the provider is unavailable.
 	for _, key := range keys {
@@ -120,11 +120,11 @@ func (r *remoteKeySet) verify(ctx context.Context, jws *jose.JSONWebSignature) (
 		}
 	}
 
-	if !r.now().Add(keysExpiryDelta).After(expiry) {
-		// Keys haven't expired, don't refresh.
-		return nil, errors.New("failed to verify id token signature")
-	}
-
+	// If the kid doesn't match any cached key, always fetch from remote regardless
+	// of cache TTL. The OIDC provider may have added new signing keys since the
+	// last fetch (e.g. EKS returns max-age=604800 but rotates keys within that window).
+	//
+	// https://openid.net/specs/openid-connect-core-1_0.html#RotateSigKeys
 	keys, err := r.keysFromRemote(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetching keys %v", err)
