@@ -54,6 +54,7 @@ import (
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
 	_ "k8s.io/kubernetes/pkg/volume/hostpath"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 )
 
@@ -2406,7 +2407,7 @@ func TestRecordPodDeferredAcceptedResizes(t *testing.T) {
 
 func makeAllocationManager(t *testing.T, runtime *containertest.FakeRuntime, allocatedPods []*v1.Pod, nodeConfig *cm.NodeConfig) Manager {
 	t.Helper()
-	statusManager := status.NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, kubeletutil.NewPodStartupLatencyTracker())
+	statusManager := status.NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, kubeletutil.NewPodStartupLatencyTracker(), clock.RealClock{}, 0)
 	var containerManager *cm.FakeContainerManager
 	if nodeConfig == nil {
 		containerManager = cm.NewFakeContainerManager()

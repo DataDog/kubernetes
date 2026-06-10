@@ -688,7 +688,11 @@ func NewMainKubelet(ctx context.Context,
 	klet.mirrorPodClient = kubepod.NewBasicMirrorClient(klet.kubeClient, string(nodeName), nodeLister)
 	klet.podManager = kubepod.NewBasicPodManager()
 
-	klet.statusManager = status.NewManager(klet.kubeClient, klet.podManager, klet, kubeDeps.PodStartupLatencyTracker)
+	var batchWindow time.Duration
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+		batchWindow = kubeCfg.PodStatusUpdateBatchWindow.Duration
+	}
+	klet.statusManager = status.NewManager(klet.kubeClient, klet.podManager, klet, kubeDeps.PodStartupLatencyTracker, clock.RealClock{}, batchWindow)
 	klet.allocationManager = allocation.NewManager(
 		klet.getRootDir(),
 		klet.containerManager.GetNodeConfig(),

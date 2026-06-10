@@ -52,6 +52,8 @@ import (
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util"
+	"k8s.io/utils/clock"
+	testingclock "k8s.io/utils/clock/testing"
 )
 
 type mutablePodManager interface {
@@ -97,7 +99,7 @@ func newTestManager(kubeClient clientset.Interface) *manager {
 	podManager := kubepod.NewBasicPodManager()
 	podManager.(mutablePodManager).AddPod(getTestPod())
 	podStartupLatencyTracker := util.NewPodStartupLatencyTracker()
-	return NewManager(kubeClient, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker).(*manager)
+	return NewManager(kubeClient, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, clock.RealClock{}, 0).(*manager)
 }
 
 func generateRandomMessage() string {
@@ -1112,7 +1114,7 @@ func TestTerminatePod_DefaultUnknownStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			podManager := kubepod.NewBasicPodManager()
 			podStartupLatencyTracker := util.NewPodStartupLatencyTracker()
-			syncer := NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker).(*manager)
+			syncer := NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, clock.RealClock{}, 0).(*manager)
 
 			original := tc.pod.DeepCopy()
 			syncer.SetPodStatus(logger, original, original.Status)
@@ -1201,7 +1203,7 @@ func TestTerminatePod_EnsurePodPhaseIsTerminal(t *testing.T) {
 			logger, _ := ktesting.NewTestContext(t)
 			podManager := kubepod.NewBasicPodManager()
 			podStartupLatencyTracker := util.NewPodStartupLatencyTracker()
-			syncer := NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker).(*manager)
+			syncer := NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, clock.RealClock{}, 0).(*manager)
 
 			pod := getTestPod()
 			pod.Status = tc.status
@@ -2074,7 +2076,7 @@ func TestMergePodStatus(t *testing.T) {
 }
 
 func TestPodResizeConditions(t *testing.T) {
-	m := NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, util.NewPodStartupLatencyTracker())
+	m := NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, util.NewPodStartupLatencyTracker(), clock.RealClock{}, 0)
 	podUID := types.UID("12345")
 
 	testCases := []struct {
@@ -2275,7 +2277,7 @@ func TestPodResizeConditions(t *testing.T) {
 }
 
 func TestClearPodResizeInProgressCondition(t *testing.T) {
-	m := NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, util.NewPodStartupLatencyTracker())
+	m := NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, util.NewPodStartupLatencyTracker(), clock.RealClock{}, 0)
 	podUID := types.UID("12345")
 
 	testCases := []struct {
@@ -2727,4 +2729,164 @@ func getPodStatus() v1.PodStatus {
 		},
 		Message: "Message",
 	}
+}
+
+func newTestManagerWithBatching(t *testing.T, kubeClient clientset.Interface, batchWindow time.Duration) (*manager, *testingclock.FakeClock) {
+	t.Helper()
+	podManager := kubepod.NewBasicPodManager()
+	podManager.(mutablePodManager).AddPod(getTestPod())
+	podStartupLatencyTracker := util.NewPodStartupLatencyTracker()
+	fakeClock := testingclock.NewFakeClock(time.Now())
+	m := NewManager(kubeClient, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, fakeClock, batchWindow).(*manager)
+	return m, fakeClock
+}
+
+func TestBatchingCoalescesStatusUpdates(t *testing.T) {
+	logger, ctx := ktesting.NewTestContext(t)
+	client := fake.NewSimpleClientset(getTestPod())
+	m, fakeClock := newTestManagerWithBatching(t, client, 1*time.Second)
+
+	pod := getTestPod()
+
+	status1 := v1.PodStatus{Message: "first"}
+	m.SetPodStatus(logger, pod, status1)
+
+	status2 := v1.PodStatus{Message: "second"}
+	m.SetPodStatus(logger, pod, status2)
+
+	numUpdates := m.consumeUpdates(ctx)
+	assert.Equal(t, 0, numUpdates, "updates should be batched, not sent yet")
+
+	fakeClock.Step(1300 * time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		n := m.consumeUpdates(ctx)
+		return n > 0
+	}, time.Second, 10*time.Millisecond, "batch timer should trigger sync")
+
+	actions := client.Actions()
+	patchCount := 0
+	for _, a := range actions {
+		if a.Matches("patch", "pods") && a.GetSubresource() == "status" {
+			patchCount++
+		}
+	}
+	assert.Equal(t, 1, patchCount, "should coalesce into a single PATCH")
+}
+
+func TestBatchingBypassOnPodBecomingReady(t *testing.T) {
+	logger, ctx := ktesting.NewTestContext(t)
+	client := fake.NewSimpleClientset(getTestPod())
+	m, _ := newTestManagerWithBatching(t, client, 1*time.Second)
+
+	pod := getTestPod()
+
+	notReady := v1.PodStatus{
+		Phase: v1.PodRunning,
+		Conditions: []v1.PodCondition{
+			{Type: v1.PodReady, Status: v1.ConditionFalse},
+		},
+		Message: "not-ready",
+	}
+	m.SetPodStatus(logger, pod, notReady)
+
+	ready := v1.PodStatus{
+		Phase: v1.PodRunning,
+		Conditions: []v1.PodCondition{
+			{Type: v1.PodReady, Status: v1.ConditionTrue},
+		},
+		Message: "ready",
+	}
+	m.SetPodStatus(logger, pod, ready)
+
+	numUpdates := m.consumeUpdates(ctx)
+	assert.Equal(t, 1, numUpdates, "PodReady transition should bypass batching")
+}
+
+func TestBatchingBypassOnPodBecomingUnready(t *testing.T) {
+	logger, ctx := ktesting.NewTestContext(t)
+	client := fake.NewSimpleClientset(getTestPod())
+	m, _ := newTestManagerWithBatching(t, client, 1*time.Second)
+
+	pod := getTestPod()
+
+	ready := v1.PodStatus{
+		Phase: v1.PodRunning,
+		Conditions: []v1.PodCondition{
+			{Type: v1.PodReady, Status: v1.ConditionTrue},
+		},
+	}
+	m.SetPodStatus(logger, pod, ready)
+	m.consumeUpdates(ctx)
+	client.ClearActions()
+
+	notReady := v1.PodStatus{
+		Phase: v1.PodRunning,
+		Conditions: []v1.PodCondition{
+			{Type: v1.PodReady, Status: v1.ConditionFalse},
+		},
+		Message: "crashed",
+	}
+	m.SetPodStatus(logger, pod, notReady)
+
+	numUpdates := m.consumeUpdates(ctx)
+	assert.Equal(t, 1, numUpdates, "PodReady→False should bypass batching")
+}
+
+func TestBatchingBypassOnTerminalPhase(t *testing.T) {
+	logger, ctx := ktesting.NewTestContext(t)
+	client := fake.NewSimpleClientset(getTestPod())
+	m, _ := newTestManagerWithBatching(t, client, 1*time.Second)
+
+	pod := getTestPod()
+
+	status := v1.PodStatus{
+		Phase:   v1.PodFailed,
+		Message: "OOMKilled",
+	}
+	m.SetPodStatus(logger, pod, status)
+
+	numUpdates := m.consumeUpdates(ctx)
+	assert.Equal(t, 1, numUpdates, "terminal phase should bypass batching")
+}
+
+func TestBatchingBypassOnForceUpdate(t *testing.T) {
+	logger, ctx := ktesting.NewTestContext(t)
+	client := fake.NewSimpleClientset(getTestPod())
+	m, _ := newTestManagerWithBatching(t, client, 1*time.Second)
+
+	pod := getTestPod()
+	pod.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+	m.podManager.(mutablePodManager).UpdatePod(pod)
+
+	status := v1.PodStatus{Message: "deleting"}
+	m.SetPodStatus(logger, pod, status)
+
+	numUpdates := m.consumeUpdates(ctx)
+	assert.Equal(t, 1, numUpdates, "forceUpdate (DeletionTimestamp) should bypass batching")
+}
+
+func TestBatchingDisabledWithZeroWindow(t *testing.T) {
+	logger, ctx := ktesting.NewTestContext(t)
+	syncer := newTestManager(&fake.Clientset{})
+
+	pod := getTestPod()
+	syncer.SetPodStatus(logger, pod, getRandomPodStatus())
+
+	numUpdates := syncer.consumeUpdates(ctx)
+	assert.Equal(t, 1, numUpdates, "zero window should behave like no batching")
+}
+
+func TestBatchingOrphanCleanup(t *testing.T) {
+	logger, _ := ktesting.NewTestContext(t)
+	m, fakeClock := newTestManagerWithBatching(t, &fake.Clientset{}, 1*time.Second)
+
+	pod := getTestPod()
+	m.SetPodStatus(logger, pod, getRandomPodStatus())
+
+	assert.Equal(t, 1, fakeClock.Waiters(), "timer should be pending")
+
+	m.RemoveOrphanedStatuses(logger, map[types.UID]bool{})
+
+	assert.Equal(t, 0, fakeClock.Waiters(), "timer should be cancelled after orphan removal")
 }

@@ -739,6 +739,12 @@ const (
 	// sandbox creation and network configuration completes successfully
 	PodReadyToStartContainersCondition featuregate.Feature = "PodReadyToStartContainersCondition"
 
+	// owner: @bob
+	//
+	// Enables batching of pod status updates within a configurable time window
+	// to reduce API server and etcd load.
+	PodStatusBatchUpdates featuregate.Feature = "PodStatusBatchUpdates"
+
 	// owner: @Huang-Wei
 	// kep: https://kep.k8s.io/3521
 	//
@@ -1634,6 +1640,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.33"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // GA in 1.35, remove in 1.38
+	},
+
+	PodStatusBatchUpdates: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	PodReadyToStartContainersCondition: {
