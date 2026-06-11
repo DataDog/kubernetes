@@ -230,6 +230,14 @@ func ValidateKubeletConfiguration(kc *kubeletconfig.KubeletConfiguration, featur
 		allErrors = append(allErrors, fmt.Errorf("invalid configuration: FeatureGate KubeletCrashLoopBackOffMax not enabled, CrashLoopBackOff.MaxContainerRestartPeriod must not be set"))
 	}
 
+	if localFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+		if kc.PodStatusUpdateBatchWindow.Duration < 250*time.Millisecond || kc.PodStatusUpdateBatchWindow.Duration > 5*time.Second {
+			allErrors = append(allErrors, fmt.Errorf("invalid configuration: PodStatusUpdateBatchWindow must be between 250ms and 5s when PodStatusBatchUpdates is enabled, got %v", kc.PodStatusUpdateBatchWindow.Duration))
+		}
+	} else if kc.PodStatusUpdateBatchWindow.Duration != 0 {
+		allErrors = append(allErrors, fmt.Errorf("invalid configuration: PodStatusUpdateBatchWindow must not be set when PodStatusBatchUpdates feature gate is disabled"))
+	}
+
 	// Check for mutually exclusive keys before the main validation loop
 	reservedKeys := map[string]bool{
 		kubetypes.SystemReservedEnforcementKey:             false,
