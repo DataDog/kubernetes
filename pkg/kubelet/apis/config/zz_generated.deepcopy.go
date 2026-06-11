@@ -492,6 +492,7 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 		(*in).DeepCopyInto(*out)
 	}
 	in.CrashLoopBackOff.DeepCopyInto(&out.CrashLoopBackOff)
+	out.PodStatusUpdateBatchWindow = in.PodStatusUpdateBatchWindow
 	if in.UserNamespaces != nil {
 		in, out := &in.UserNamespaces, &out.UserNamespaces
 		*out = new(UserNamespaces)

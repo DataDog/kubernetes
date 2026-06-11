@@ -269,6 +269,7 @@ var (
 		"OOMScoreAdj",
 		"PodCIDR",
 		"PodPidsLimit",
+		"PodStatusUpdateBatchWindow.Duration",
 		"PodsPerCore",
 		"Port",
 		"PreloadedImagesVerificationAllowlist[*]",
