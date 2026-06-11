@@ -72884,6 +72884,12 @@ func schema_k8sio_kubelet_config_v1beta1_KubeletConfiguration(ref common.Referen
 							Ref:         ref(kubeletconfigv1beta1.CrashLoopBackOffConfig{}.OpenAPIModelName()),
 						},
 					},
+					"podStatusUpdateBatchWindow": {
+						SchemaProps: spec.SchemaProps{
+							Description: "podStatusUpdateBatchWindow is the duration to wait before flushing a pod's status update to the API server, allowing multiple container state changes to be coalesced into a single update. When the PodStatusBatchUpdates feature gate is enabled this must be between 250ms and 5s (defaults to 1s if unset); when the gate is disabled this must be zero.",
+							Ref:         ref(metav1.Duration{}.OpenAPIModelName()),
+						},
+					},
 					"reservedMemory": {
 						SchemaProps: spec.SchemaProps{
 							Description: "reservedMemory specifies a comma-separated list of memory reservations for NUMA nodes. The parameter makes sense only in the context of the memory manager feature. The memory manager will not allocate reserved memory for container workloads. For example, if you have a NUMA0 with 10Gi of memory and the reservedMemory was specified to reserve 1Gi of memory at NUMA0, the memory manager will assume that only 9Gi is available for allocation. You can specify a different amount of NUMA node and memory types. You can omit this parameter at all, but you should be aware that the amount of reserved memory from all NUMA nodes should be equal to the amount of memory specified by the [node allocatable](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#node-allocatable). If at least one node allocatable parameter has a non-zero value, you will need to specify at least one NUMA node. Also, avoid specifying:\n\n1. Duplicates, the same NUMA node, and memory type, but with a different value. 2. zero limits for any memory type. 3. NUMAs nodes IDs that do not exist under the machine. 4. memory types except for memory and hugepages-<size>\n\nDefault: nil",
