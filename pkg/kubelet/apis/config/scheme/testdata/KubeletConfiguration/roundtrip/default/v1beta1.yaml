@@ -81,6 +81,7 @@ nodeStatusUpdateFrequency: 10s
 oomScoreAdj: -999
 podLogsDir: /var/log/pods
 podPidsLimit: -1
+podStatusUpdateBatchWindow: 0s
 port: 10250
 registerNode: true
 registryBurst: 10
