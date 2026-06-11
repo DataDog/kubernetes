@@ -318,6 +318,12 @@ func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfigura
 		}
 	}
 
+	if localFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+		if obj.PodStatusUpdateBatchWindow == zeroDuration {
+			obj.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 1 * time.Second}
+		}
+	}
+
 	if localFeatureGate.Enabled(features.KubeletEnsureSecretPulledImages) {
 		if obj.ImagePullCredentialsVerificationPolicy == "" {
 			obj.ImagePullCredentialsVerificationPolicy = kubeletconfigv1beta1.NeverVerifyPreloadedImages
