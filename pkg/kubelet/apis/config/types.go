@@ -559,6 +559,15 @@ type KubeletConfiguration struct {
 	// +optional
 	CrashLoopBackOff CrashLoopBackOffConfig
 
+	// PodStatusUpdateBatchWindow is the duration to wait before flushing a pod's
+	// status update to the API server, allowing multiple container state changes
+	// to be coalesced into a single update. When the PodStatusBatchUpdates
+	// feature gate is enabled this must be between 250ms and 5s (defaults to
+	// 1s if unset); when the gate is disabled this must be zero.
+	// +featureGate=PodStatusBatchUpdates
+	// +optional
+	PodStatusUpdateBatchWindow metav1.Duration
+
 	// UserNamespaces contains User Namespace configurations.
 	// +featureGate=UserNamespacesSupport
 	// +optional

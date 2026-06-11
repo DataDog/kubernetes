@@ -856,6 +856,14 @@ type KubeletConfiguration struct {
 	// +featureGate=KubeletCrashLoopBackOffMax
 	// +optional
 	CrashLoopBackOff CrashLoopBackOffConfig `json:"crashLoopBackOff,omitempty"`
+	// podStatusUpdateBatchWindow is the duration to wait before flushing a pod's
+	// status update to the API server, allowing multiple container state changes
+	// to be coalesced into a single update. When the PodStatusBatchUpdates
+	// feature gate is enabled this must be between 250ms and 5s (defaults to
+	// 1s if unset); when the gate is disabled this must be zero.
+	// +featureGate=PodStatusBatchUpdates
+	// +optional
+	PodStatusUpdateBatchWindow metav1.Duration `json:"podStatusUpdateBatchWindow,omitempty"`
 	// reservedMemory specifies a comma-separated list of memory reservations for NUMA nodes.
 	// The parameter makes sense only in the context of the memory manager feature.
 	// The memory manager will not allocate reserved memory for container workloads.
