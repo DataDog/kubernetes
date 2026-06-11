@@ -601,6 +601,7 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 		copy(*out, *in)
 	}
 	in.CrashLoopBackOff.DeepCopyInto(&out.CrashLoopBackOff)
+	out.PodStatusUpdateBatchWindow = in.PodStatusUpdateBatchWindow
 	if in.ReservedMemory != nil {
 		in, out := &in.ReservedMemory, &out.ReservedMemory
 		*out = make([]MemoryReservation, len(*in))

@@ -1638,6 +1638,12 @@
     lockToDefault: true
     preRelease: GA
     version: "1.30"
+- name: PodStatusBatchUpdates
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.35"
 - name: PodTopologyLabelsAdmission
   versionedSpecs:
   - default: false
