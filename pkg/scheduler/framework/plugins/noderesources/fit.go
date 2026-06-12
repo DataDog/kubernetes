@@ -34,6 +34,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/feature"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/names"
+	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	schedutil "k8s.io/kubernetes/pkg/scheduler/util"
 )
 
@@ -53,6 +54,22 @@ const (
 
 	// preScoreStateKey is the key in CycleState to NodeResourcesFit pre-computed data for Scoring.
 	preScoreStateKey = "PreScore" + Name
+
+	// ExcludeFromMaxPodCountAnnotationKey is the pod annotation that opts an
+	// individual pod out of the kubelet/scheduler node-level pod-count cap
+	// (v1.ResourcePods / NodeStatus.Allocatable.Pods).
+	//
+	// The annotation is honoured if and only if its value is the literal
+	// string "true". Any other value -- empty, missing, "false", "1", "True",
+	// or otherwise malformed -- is treated as non-exempt. This fail-closed
+	// behaviour is intentional: see isExcludedFromMaxPodCount.
+	ExcludeFromMaxPodCountAnnotationKey = "kubelet.datadoghq.com/exclude-from-max-pods"
+
+	// excludeFromMaxPodCountAnnotationValue is the only value that activates
+	// the exemption. Keep this as a private constant so callers are forced
+	// through isExcludedFromMaxPodCount and cannot accidentally accept other
+	// truthy-looking spellings.
+	excludeFromMaxPodCountAnnotationValue = "true"
 )
 
 // nodeResourceStrategyTypeMap maps strategy to scorer implementation
@@ -103,6 +120,15 @@ func (f *Fit) ScoreExtensions() framework.ScoreExtensions {
 // preFilterState computed at PreFilter and used at Filter.
 type preFilterState struct {
 	framework.Resource
+	// ExcludeFromPodCount indicates whether the incoming pod has opted out of
+	// the node-level pod-count cap (v1.ResourcePods / Allocatable.Pods) via
+	// the ExcludeFromMaxPodCountAnnotationKey annotation. It is computed once
+	// at PreFilter time (in computePodResourceRequest) and consumed at Filter
+	// time by fitsRequest, which is the single source of truth for the
+	// pod-count check. Only the allowedPodNumber comparison is affected; CPU,
+	// memory, ephemeral-storage, and scalar/extended resource accounting are
+	// unchanged. See isExcludedFromMaxPodCount for the full contract.
+	ExcludeFromPodCount bool
 }
 
 // Clone the prefilter state.
@@ -223,6 +249,40 @@ func computePodResourceRequest(pod *v1.Pod, opts ResourceRequestsOptions) *preFi
 	})
 	result := &preFilterState{}
 	result.SetMaxResource(reqs)
+	// Resolve the pod-count exemption decision once, at PreFilter time, so that
+	// every Filter invocation against this state observes the same value. This
+	// affects only the allowedPodNumber check in fitsRequest (step 4 wires it
+	// in); all other resource accounting above is intentionally unchanged.
+	result.ExcludeFromPodCount = isExcludedFromMaxPodCount(pod)
+	if result.ExcludeFromPodCount {
+		// Temporary rollout observability: emit a verbose log line and a
+		// per-namespace counter whenever an exempt pod is observed so
+		// operators can grep scheduler / kubelet logs and Prometheus for
+		// unexpected use of the exemption during the staged rollout.
+		//
+		// The log is at V(4) so it costs nothing at default verbosity.
+		// The counter is exposed as
+		// scheduler_pod_count_exemption_admissions_total{namespace=...}.
+		//
+		// Both are intentionally temporary. The design note
+		// (scratch/max-pod-count-exclusions/design-note.md §3b) delegates
+		// production-grade exemption-usage telemetry to the admission
+		// webhook / audit log, so this counter and log are debugging aids
+		// for the initial rollout only and may be removed once the
+		// rollout has soaked. See also the upgrade-notes.md companion in
+		// the same directory for the touched-symbol list.
+		klog.V(4).InfoS("noderesources: pod opted out of max-pod-count cap",
+			"pod", klog.KObj(pod),
+			"annotation", ExcludeFromMaxPodCountAnnotationKey)
+		// Guard against the metric not being initialized (tests that
+		// exercise this plugin without calling metrics.Register, e.g.
+		// fit_test.go, leave the package-level CounterVec nil). Treat
+		// observability as best-effort: a missing metric must never
+		// short-circuit the admission decision.
+		if c := metrics.PodCountExemptionAdmissionsTotal; c != nil {
+			c.WithLabelValues(pod.Namespace).Inc()
+		}
+	}
 	return result
 }
 
@@ -438,6 +498,55 @@ func haveAnyRequestedResourcesIncreased(pod *v1.Pod, originalNode, modifiedNode 
 	return false
 }
 
+// isExcludedFromMaxPodCount reports whether pod has opted out of the node-level
+// pod-count cap (v1.ResourcePods / NodeStatus.Allocatable.Pods) via the
+// ExcludeFromMaxPodCountAnnotationKey annotation.
+//
+// Contract (see scratch/max-pod-count-exclusions/contract.md):
+//
+//  1. The opt-in surface is the pod annotation
+//     ExcludeFromMaxPodCountAnnotationKey. Labels are intentionally not
+//     supported: labels are selector-visible and routinely mutated by
+//     controllers, so an accidental selector match could enable the
+//     exemption without an explicit operator decision.
+//
+//  2. Only the literal value "true" opts in. Empty, missing, "false", "1",
+//     "yes", "True", whitespace-padded, or otherwise malformed values are
+//     treated as non-exempt. This is fail-closed by design: anyone wanting
+//     the exemption must spell it exactly.
+//
+//  3. The exemption scope is strictly v1.ResourcePods accounting -- i.e. the
+//     allowedPodNumber comparison in fitsRequest. It does NOT relax CPU,
+//     memory, ephemeral-storage, scalar/extended resource, taint, affinity,
+//     topology, volume-limits, or any other scheduler/admission check. An
+//     exempt pod whose CPU/memory request exceeds node capacity is still
+//     rejected.
+//
+//  4. There is NO in-tree policy enforcement of who may set this annotation.
+//     The scheduler and kubelet honour the annotation if present and truthy.
+//     Cluster operators are expected to gate usage via a
+//     ValidatingAdmissionPolicy / admission webhook / mutating layer that
+//     strips the annotation from untrusted callers. Treat the presence of
+//     this annotation as an explicit operator decision delivered via the
+//     admission stack.
+//
+//  5. CNI / IPAM / conntrack / node-local resource pools are sized
+//     independently of the kubelet pod cap. Bypassing the cap can saturate
+//     them and cause secondary failures (IP exhaustion, conntrack overflow,
+//     etc.) that the scheduler cannot observe. Operators MUST add
+//     observability and alerting for node pod density before enabling this
+//     annotation in production.
+//
+// Both the scheduler filter path and the kubelet admission path consume this
+// helper indirectly via noderesources.Fits / scheduler.AdmissionCheck, so it
+// is the single source of truth for the exemption decision.
+func isExcludedFromMaxPodCount(pod *v1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	return pod.Annotations[ExcludeFromMaxPodCountAnnotationKey] == excludeFromMaxPodCountAnnotationValue
+}
+
 // isFit checks if the pod fits the node. If the node is nil, it returns false.
 // It constructs a fake NodeInfo object for the node and checks if the pod fits the node.
 func isFit(pod *v1.Pod, node *v1.Node, opts ResourceRequestsOptions) bool {
@@ -508,12 +617,26 @@ func Fits(pod *v1.Pod, nodeInfo *framework.NodeInfo, opts ResourceRequestsOption
 func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignoredExtendedResources, ignoredResourceGroups sets.Set[string]) []InsufficientResource {
 	insufficientResources := make([]InsufficientResource, 0, 4)
 
+	// podCountIncrement is the contribution the incoming pod makes to the
+	// node's pod-count usage for the purposes of the allowedPodNumber check.
+	// Normally this is 1. If the incoming pod has opted out of the pod-count
+	// cap via ExcludeFromMaxPodCountAnnotationKey (resolved at PreFilter time
+	// and recorded on preFilterState.ExcludeFromPodCount), it is 0, meaning
+	// the pod will not be blocked by Allocatable.Pods. Only the pod-count
+	// dimension is affected; CPU, memory, ephemeral-storage and scalar /
+	// extended resources below are unchanged. See isExcludedFromMaxPodCount
+	// for the full contract.
+	podCountIncrement := 1
+	if podRequest.ExcludeFromPodCount {
+		podCountIncrement = 0
+	}
+
 	allowedPodNumber := nodeInfo.Allocatable.AllowedPodNumber
-	if len(nodeInfo.Pods)+1 > allowedPodNumber {
+	if len(nodeInfo.Pods)+podCountIncrement > allowedPodNumber {
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourcePods,
 			Reason:       "Too many pods",
-			Requested:    1,
+			Requested:    int64(podCountIncrement),
 			Used:         int64(len(nodeInfo.Pods)),
 			Capacity:     int64(allowedPodNumber),
 		})
