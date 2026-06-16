@@ -1,0 +1,6 @@
+issuer: https://gitlab.ddbuild.io
+
+subject_pattern: "project_path:DataDog/kubernetes:ref_type:tag:ref:[vw].+"
+
+permissions:
+  contents: write
