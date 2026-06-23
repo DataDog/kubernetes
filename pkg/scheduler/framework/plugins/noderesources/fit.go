@@ -103,6 +103,7 @@ func (f *Fit) ScoreExtensions() framework.ScoreExtensions {
 // preFilterState computed at PreFilter and used at Filter.
 type preFilterState struct {
 	framework.Resource
+	ExcludeFromPodCount bool // Datadog: **NOT FROM UPSTREAM K8s**
 }
 
 // Clone the prefilter state.
@@ -223,6 +224,7 @@ func computePodResourceRequest(pod *v1.Pod, opts ResourceRequestsOptions) *preFi
 	})
 	result := &preFilterState{}
 	result.SetMaxResource(reqs)
+	result.ExcludeFromPodCount = isExcludedFromMaxPodCount(pod) // Datadog: **NOT FROM UPSTREAM K8s**
 	return result
 }
 
@@ -509,6 +511,7 @@ func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignor
 	insufficientResources := make([]InsufficientResource, 0, 4)
 
 	allowedPodNumber := nodeInfo.Allocatable.AllowedPodNumber
+	allowedPodNumber = incrAllowedPodNumberWhenExcludedFromPodCount(allowedPodNumber, podRequest.ExcludeFromPodCount) // Datadog: **NOT FROM UPSTREAM K8s**
 	if len(nodeInfo.Pods)+1 > allowedPodNumber {
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourcePods,
