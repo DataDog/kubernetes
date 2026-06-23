@@ -112,6 +112,7 @@ func (f *Fit) ScoreExtensions() fwk.ScoreExtensions {
 // preFilterState computed at PreFilter and used at Filter.
 type preFilterState struct {
 	framework.Resource
+	PodOverflowAllowed bool // Datadog: **NOT FROM UPSTREAM K8s**
 }
 
 // Clone the prefilter state.
@@ -327,6 +328,7 @@ func computePodResourceRequest(pod *v1.Pod, opts ResourceRequestsOptions) *preFi
 	})
 	result := &preFilterState{}
 	result.SetMaxResource(reqs)
+	result.PodOverflowAllowed = podOverflowAllowed(pod) // Datadog: **NOT FROM UPSTREAM K8s**
 	return result
 }
 
@@ -679,7 +681,7 @@ func fitsRequest(podRequest *preFilterState, nodeInfo fwk.NodeInfo, ignoredExten
 	insufficientResources := make([]InsufficientResource, 0, 4)
 
 	allowedPodNumber := nodeInfo.GetAllocatable().GetAllowedPodNumber()
-	if len(nodeInfo.GetPods())+1 > allowedPodNumber {
+	if !podRequest.PodOverflowAllowed && len(nodeInfo.GetPods())+1 > allowedPodNumber { // Datadog: **NOT FROM UPSTREAM K8s**
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourcePods,
 			Reason:       "Too many pods",
