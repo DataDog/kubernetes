@@ -19,6 +19,7 @@ package rest
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/warning"
+	"k8s.io/component-base/tracing"
 )
 
 // RESTUpdateStrategy defines the minimum validation, accepted input, and
@@ -126,7 +128,9 @@ func BeforeUpdate(strategy RESTUpdateStrategy, ctx context.Context, obj, old run
 	}
 	objectMeta.SetGeneration(oldMeta.GetGeneration())
 
+	_, prepareSpan := tracing.Start(ctx, "rest.BeforeUpdate PrepareForUpdate")
 	strategy.PrepareForUpdate(ctx, obj, old)
+	prepareSpan.End(500 * time.Millisecond)
 
 	// Use the existing UID if none is provided
 	if len(objectMeta.GetUID()) == 0 {
@@ -146,22 +150,30 @@ func BeforeUpdate(strategy RESTUpdateStrategy, ctx context.Context, obj, old run
 	}
 
 	// Ensure some common fields, like UID, are validated for all resources.
+	_, commonSpan := tracing.Start(ctx, "rest.BeforeUpdate validateCommonFields")
 	errs, err := validateCommonFields(obj, old, strategy)
+	commonSpan.End(500 * time.Millisecond)
 	if err != nil {
 		return errors.NewInternalError(err)
 	}
 
+	_, validateSpan := tracing.Start(ctx, "rest.BeforeUpdate ValidateUpdate")
 	errs = append(errs, strategy.ValidateUpdate(ctx, obj, old)...)
+	validateSpan.End(500 * time.Millisecond)
 	if len(errs) > 0 {
 		RecordDuplicateValidationErrors(ctx, kind.GroupKind(), errs)
 		return errors.NewInvalid(kind.GroupKind(), objectMeta.GetName(), errs)
 	}
 
+	_, warnSpan := tracing.Start(ctx, "rest.BeforeUpdate WarningsOnUpdate")
 	for _, w := range strategy.WarningsOnUpdate(ctx, obj, old) {
 		warning.AddWarning(ctx, "", w)
 	}
+	warnSpan.End(500 * time.Millisecond)
 
+	_, canonicalizeSpan := tracing.Start(ctx, "rest.BeforeUpdate Canonicalize")
 	strategy.Canonicalize(obj)
+	canonicalizeSpan.End(500 * time.Millisecond)
 
 	return nil
 }

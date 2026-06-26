@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"sigs.k8s.io/structured-merge-diff/v6/fieldpath"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,9 +53,12 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	flowcontrolrequest "k8s.io/apiserver/pkg/util/flowcontrol/request"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/component-base/tracing"
 
 	"k8s.io/klog/v2"
 )
+
+const traceStepThreshold = 500 * time.Millisecond
 
 // FinishFunc is a function returned by Begin hooks to complete an operation.
 type FinishFunc func(ctx context.Context, success bool)
@@ -639,6 +643,12 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 	// deleteObj is only used in case a deletion is carried out
 	var deleteObj runtime.Object
 	err = e.Storage.GuaranteedUpdate(ctx, key, out, ignoreNotFound, storagePreconditions, func(existing runtime.Object, res storage.ResponseMeta) (runtime.Object, *uint64, error) {
+		ctx, tryUpdateSpan := tracing.Start(ctx, "registry.Update tryUpdate",
+			attribute.String("resource", qualifiedResource.Resource),
+			attribute.String("group", qualifiedResource.Group),
+			attribute.String("name", name))
+		defer tryUpdateSpan.End(traceStepThreshold)
+
 		existingResourceVersion, err := e.Storage.Versioner().ObjectResourceVersion(existing)
 		if err != nil {
 			return nil, nil, err
@@ -650,7 +660,9 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 		}
 
 		// Given the existing object, get the new object
-		obj, err := objInfo.UpdatedObject(ctx, existing)
+		uoCtx, uoSpan := tracing.Start(ctx, "registry.Update UpdatedObject (transformers)")
+		obj, err := objInfo.UpdatedObject(uoCtx, existing)
+		uoSpan.End(traceStepThreshold)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -688,13 +700,19 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 
 			creating = true
 			creatingObj = obj
-			if err := rest.BeforeCreate(e.CreateStrategy, ctx, obj); err != nil {
+			bcCtx, bcSpan := tracing.Start(ctx, "registry.Update BeforeCreate")
+			err := rest.BeforeCreate(e.CreateStrategy, bcCtx, obj)
+			bcSpan.End(traceStepThreshold)
+			if err != nil {
 				return nil, nil, err
 			}
 			// at this point we have a fully formed object.  It is time to call the validators that the apiserver
 			// handling chain wants to enforce.
 			if createValidation != nil {
-				if err := createValidation(ctx, obj.DeepCopyObject()); err != nil {
+				cvCtx, cvSpan := tracing.Start(ctx, "registry.Update createValidation (admission)")
+				err := createValidation(cvCtx, obj.DeepCopyObject())
+				cvSpan.End(traceStepThreshold)
+				if err != nil {
 					return nil, nil, err
 				}
 			}
@@ -750,14 +768,19 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 			}()
 		}
 
-		if err := rest.BeforeUpdate(e.UpdateStrategy, ctx, obj, existing); err != nil {
+		buCtx, buSpan := tracing.Start(ctx, "registry.Update BeforeUpdate")
+		err = rest.BeforeUpdate(e.UpdateStrategy, buCtx, obj, existing)
+		buSpan.End(traceStepThreshold)
+		if err != nil {
 			return nil, nil, err
 		}
 
 		// Ignore changes that only affect managed fields timestamps.
 		// FieldManager can't know about changes like normalized fields, defaulted
 		// fields and other mutations.
-		obj, err = fieldmanager.IgnoreManagedFieldsTimestampsTransformer(ctx, obj, existing)
+		mfCtx, mfSpan := tracing.Start(ctx, "registry.Update IgnoreManagedFieldsTimestampsTransformer")
+		obj, err = fieldmanager.IgnoreManagedFieldsTimestampsTransformer(mfCtx, obj, existing)
+		mfSpan.End(traceStepThreshold)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -765,7 +788,10 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 		// at this point we have a fully formed object.  It is time to call the validators that the apiserver
 		// handling chain wants to enforce.
 		if updateValidation != nil {
-			if err := updateValidation(ctx, obj.DeepCopyObject(), existing.DeepCopyObject()); err != nil {
+			uvCtx, uvSpan := tracing.Start(ctx, "registry.Update updateValidation (admission)")
+			err := updateValidation(uvCtx, obj.DeepCopyObject(), existing.DeepCopyObject())
+			uvSpan.End(traceStepThreshold)
+			if err != nil {
 				return nil, nil, err
 			}
 		}

@@ -322,20 +322,27 @@ type jsonPatcher struct {
 
 func (p *jsonPatcher) applyPatchToCurrentObject(requestContext context.Context, currentObject runtime.Object) (runtime.Object, error) {
 	// Encode will convert & return a versioned object in JSON.
+	_, encodeSpan := tracing.Start(requestContext, "jsonPatcher encode current")
 	currentObjJS, err := runtime.Encode(p.codec, currentObject)
+	encodeSpan.End(500 * time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
 
 	// Apply the patch.
+	_, applySpan := tracing.Start(requestContext, "jsonPatcher applyJSPatch")
 	patchedObjJS, appliedStrictErrs, err := p.applyJSPatch(currentObjJS)
+	applySpan.End(500 * time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
 
 	// Construct the resulting typed, unversioned object.
 	objToUpdate := p.restPatcher.New()
-	if err := runtime.DecodeInto(p.codec, patchedObjJS, objToUpdate); err != nil {
+	_, decodeSpan := tracing.Start(requestContext, "jsonPatcher decode patched")
+	decodeErr := runtime.DecodeInto(p.codec, patchedObjJS, objToUpdate)
+	decodeSpan.End(500 * time.Millisecond)
+	if err := decodeErr; err != nil {
 		strictError, isStrictError := runtime.AsStrictDecodingError(err)
 		switch {
 		case !isStrictError:
@@ -369,7 +376,9 @@ func (p *jsonPatcher) applyPatchToCurrentObject(requestContext context.Context, 
 		// happen on the next line
 		panic("PatchOptions required but not provided")
 	}
+	_, fmSpan := tracing.Start(requestContext, "jsonPatcher fieldManager.Update")
 	objToUpdate = p.fieldManager.UpdateNoErrors(currentObject, objToUpdate, managerOrUserAgent(p.options.FieldManager, p.userAgent))
+	fmSpan.End(500 * time.Millisecond)
 	return objToUpdate, nil
 }
 
@@ -446,7 +455,9 @@ type smpPatcher struct {
 func (p *smpPatcher) applyPatchToCurrentObject(requestContext context.Context, currentObject runtime.Object) (runtime.Object, error) {
 	// Since the patch is applied on versioned objects, we need to convert the
 	// current object to versioned representation first.
+	_, convInSpan := tracing.Start(requestContext, "smpPatcher convert current to versioned")
 	currentVersionedObject, err := p.unsafeConvertor.ConvertToVersion(currentObject, p.kind.GroupVersion())
+	convInSpan.End(500 * time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
@@ -454,16 +465,23 @@ func (p *smpPatcher) applyPatchToCurrentObject(requestContext context.Context, c
 	if err != nil {
 		return nil, err
 	}
-	if err := strategicPatchObject(requestContext, p.defaulter, currentVersionedObject, p.patchBytes, versionedObjToUpdate, p.schemaReferenceObj, p.validationDirective); err != nil {
+	spoCtx, spoSpan := tracing.Start(requestContext, "smpPatcher strategicPatchObject")
+	err = strategicPatchObject(spoCtx, p.defaulter, currentVersionedObject, p.patchBytes, versionedObjToUpdate, p.schemaReferenceObj, p.validationDirective)
+	spoSpan.End(500 * time.Millisecond)
+	if err != nil {
 		return nil, err
 	}
 	// Convert the object back to the hub version
+	_, convOutSpan := tracing.Start(requestContext, "smpPatcher convert back to hub")
 	newObj, err := p.unsafeConvertor.ConvertToVersion(versionedObjToUpdate, p.hubGroupVersion)
+	convOutSpan.End(500 * time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
 
+	_, fmSpan := tracing.Start(requestContext, "smpPatcher fieldManager.Update")
 	newObj = p.fieldManager.UpdateNoErrors(currentObject, newObj, managerOrUserAgent(p.options.FieldManager, p.userAgent))
+	fmSpan.End(500 * time.Millisecond)
 	return newObj, nil
 }
 
@@ -587,7 +605,9 @@ func (p *patcher) applyPatch(ctx context.Context, _, currentObject runtime.Objec
 	} else if !currentObjectHasUID {
 		objToUpdate, patchErr = p.mechanism.createNewObject(ctx)
 	} else {
-		objToUpdate, patchErr = p.mechanism.applyPatchToCurrentObject(ctx, currentObject)
+		mechCtx, mechSpan := tracing.Start(ctx, "patcher applyPatchToCurrentObject")
+		objToUpdate, patchErr = p.mechanism.applyPatchToCurrentObject(mechCtx, currentObject)
+		mechSpan.End(500 * time.Millisecond)
 	}
 
 	if patchErr != nil {
@@ -644,7 +664,9 @@ func (p *patcher) applyAdmission(ctx context.Context, patchedObject runtime.Obje
 	}
 	if p.admissionCheck != nil && p.admissionCheck.Handles(operation) {
 		attributes := p.admissionAttributes(ctx, patchedObject, currentObject, operation, options)
-		return patchedObject, p.admissionCheck.Admit(ctx, attributes, p.objectInterfaces)
+		admitCtx, admitSpan := tracing.Start(ctx, "patcher mutating admission Admit")
+		defer admitSpan.End(500 * time.Millisecond)
+		return patchedObject, p.admissionCheck.Admit(admitCtx, attributes, p.objectInterfaces)
 	}
 	return patchedObject, nil
 }
