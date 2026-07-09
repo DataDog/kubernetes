@@ -107,6 +107,7 @@ type preFilterState struct {
 	framework.Resource
 	// resourceToDeviceClass holds the mapping of extended resource to device class name.
 	resourceToDeviceClass map[v1.ResourceName]string
+	Headroom              podHeadroom // Datadog: **NOT FROM UPSTREAM K8s**
 }
 
 // Clone the prefilter state.
@@ -229,6 +230,7 @@ func computePodResourceRequest(pod *v1.Pod, opts ResourceRequestsOptions) *preFi
 	})
 	result := &preFilterState{}
 	result.SetMaxResource(reqs)
+	result.Headroom = podRequestedHeadroom(pod) // Datadog: **NOT FROM UPSTREAM K8s**
 	return result
 }
 
@@ -565,41 +567,49 @@ func fitsRequest(podRequest *preFilterState, nodeInfo fwk.NodeInfo, ignoredExten
 	insufficientResources := make([]InsufficientResource, 0, 4)
 
 	allowedPodNumber := nodeInfo.GetAllocatable().GetAllowedPodNumber()
-	if len(nodeInfo.GetPods())+1 > allowedPodNumber {
+	requestedPodNumber := 1 + podRequest.Headroom.Pods
+	usedPodNumber := len(nodeInfo.GetPods())
+	if usedPodNumber+requestedPodNumber > allowedPodNumber { // Datadog: **NOT FROM UPSTREAM K8s**
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourcePods,
 			Reason:       "Too many pods",
-			Requested:    1,
-			Used:         int64(len(nodeInfo.GetPods())),
+			Requested:    int64(requestedPodNumber),
+			Used:         int64(usedPodNumber),
 			Capacity:     int64(allowedPodNumber),
 		})
 	}
 
 	if podRequest.MilliCPU == 0 &&
+		podRequest.Headroom.MilliCPU == 0 &&
 		podRequest.Memory == 0 &&
+		podRequest.Headroom.Memory == 0 &&
 		podRequest.EphemeralStorage == 0 &&
 		len(podRequest.ScalarResources) == 0 {
 		return insufficientResources
 	}
 
-	if podRequest.MilliCPU > 0 && podRequest.MilliCPU > (nodeInfo.GetAllocatable().GetMilliCPU()-nodeInfo.GetRequested().GetMilliCPU()) {
+	requestedMilliCPU := podRequest.MilliCPU + podRequest.Headroom.MilliCPU // Datadog: **NOT FROM UPSTREAM K8s**
+	usedMilliCPU := nodeInfo.GetRequested().GetMilliCPU()
+	if requestedMilliCPU > 0 && requestedMilliCPU > (nodeInfo.GetAllocatable().GetMilliCPU()-usedMilliCPU) {
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourceCPU,
 			Reason:       "Insufficient cpu",
-			Requested:    podRequest.MilliCPU,
-			Used:         nodeInfo.GetRequested().GetMilliCPU(),
+			Requested:    requestedMilliCPU,
+			Used:         usedMilliCPU,
 			Capacity:     nodeInfo.GetAllocatable().GetMilliCPU(),
-			Unresolvable: podRequest.MilliCPU > nodeInfo.GetAllocatable().GetMilliCPU(),
+			Unresolvable: requestedMilliCPU > nodeInfo.GetAllocatable().GetMilliCPU(),
 		})
 	}
-	if podRequest.Memory > 0 && podRequest.Memory > (nodeInfo.GetAllocatable().GetMemory()-nodeInfo.GetRequested().GetMemory()) {
+	requestedMemory := podRequest.Memory + podRequest.Headroom.Memory // Datadog: **NOT FROM UPSTREAM K8s**
+	usedMemory := nodeInfo.GetRequested().GetMemory()
+	if requestedMemory > 0 && requestedMemory > (nodeInfo.GetAllocatable().GetMemory()-usedMemory) {
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourceMemory,
 			Reason:       "Insufficient memory",
-			Requested:    podRequest.Memory,
-			Used:         nodeInfo.GetRequested().GetMemory(),
+			Requested:    requestedMemory,
+			Used:         usedMemory,
 			Capacity:     nodeInfo.GetAllocatable().GetMemory(),
-			Unresolvable: podRequest.Memory > nodeInfo.GetAllocatable().GetMemory(),
+			Unresolvable: requestedMemory > nodeInfo.GetAllocatable().GetMemory(),
 		})
 	}
 	if podRequest.EphemeralStorage > 0 &&
