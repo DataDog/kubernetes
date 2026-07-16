@@ -19,6 +19,7 @@ package cel
 import (
 	"context"
 	"reflect"
+	"sync"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -29,6 +30,23 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/cel/environment"
 )
+
+// unstructuredCacheKey is the context key under which a per-Validate()-call
+// cache of object->unstructured conversions is stored. matchConditions,
+// validations, messageExpression and auditAnnotations are each evaluated as
+// separate ConditionEvaluator passes against the same object/oldObject/params,
+// and without this cache each pass independently repeats the same
+// reflection-based runtime.DefaultUnstructuredConverter.ToUnstructured() work.
+type unstructuredCacheKey struct{}
+
+// ContextWithUnstructuredCache returns a context that causes convertObjectToUnstructured
+// to memoize conversions by object pointer identity for the lifetime of the returned
+// context. Callers that invoke multiple ConditionEvaluator passes against the same
+// versionedAttr/params within one logical evaluation (e.g. validator.Validate) should
+// wrap their context with this once, upfront, so the passes share converted results.
+func ContextWithUnstructuredCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, unstructuredCacheKey{}, &sync.Map{})
+}
 
 // conditionCompiler implement the interface ConditionCompiler.
 type conditionCompiler struct {
@@ -62,9 +80,27 @@ func NewCondition(compilationResults []CompilationResult) ConditionEvaluator {
 	}
 }
 
-func convertObjectToUnstructured(obj interface{}) (*unstructured.Unstructured, error) {
+func convertObjectToUnstructured(ctx context.Context, obj interface{}) (*unstructured.Unstructured, error) {
 	if obj == nil || reflect.ValueOf(obj).IsNil() {
 		return &unstructured.Unstructured{Object: nil}, nil
+	}
+	if cacheAny := ctx.Value(unstructuredCacheKey{}); cacheAny != nil {
+		cache := cacheAny.(*sync.Map)
+		// obj is always a pointer to a concrete runtime.Object/AdmissionRequest/Namespace,
+		// so it's comparable and safe to use as a map key directly.
+		if cached, ok := cache.Load(obj); ok {
+			return cached.(*unstructured.Unstructured), nil
+		}
+		ret, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+		if err != nil {
+			return nil, err
+		}
+		u := &unstructured.Unstructured{Object: ret}
+		// LoadOrStore rather than Store: if two passes race to convert the same
+		// object concurrently, keep whichever result was stored first so both
+		// return the identical value.
+		actual, _ := cache.LoadOrStore(obj, u)
+		return actual.(*unstructured.Unstructured), nil
 	}
 	ret, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
@@ -73,11 +109,11 @@ func convertObjectToUnstructured(obj interface{}) (*unstructured.Unstructured, e
 	return &unstructured.Unstructured{Object: ret}, nil
 }
 
-func objectToResolveVal(r runtime.Object) (interface{}, error) {
+func objectToResolveVal(ctx context.Context, r runtime.Object) (interface{}, error) {
 	if r == nil || reflect.ValueOf(r).IsNil() {
 		return nil, nil
 	}
-	v, err := convertObjectToUnstructured(r)
+	v, err := convertObjectToUnstructured(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +131,7 @@ func (c *condition) ForInput(ctx context.Context, versionedAttr *admission.Versi
 	// if this activation supports composition, we will need the compositionCtx. It may be nil.
 	compositionCtx, _ := ctx.(CompositionContext)
 
-	activation, err := newActivation(compositionCtx, versionedAttr, request, inputs, namespace)
+	activation, err := newActivation(ctx, compositionCtx, versionedAttr, request, inputs, namespace)
 	if err != nil {
 		return nil, -1, err
 	}
