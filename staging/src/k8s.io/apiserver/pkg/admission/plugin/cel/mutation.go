@@ -52,7 +52,7 @@ func (p *mutatingEvaluator) ForInput(ctx context.Context, versionedAttr *admissi
 	// if this activation supports composition, we will need the compositionCtx. It may be nil.
 	compositionCtx, _ := ctx.(CompositionContext)
 
-	activation, err := newActivation(compositionCtx, versionedAttr, request, inputs, namespace)
+	activation, err := newActivation(ctx, compositionCtx, versionedAttr, request, inputs, namespace)
 	if err != nil {
 		return EvaluationResult{}, -1, err
 	}

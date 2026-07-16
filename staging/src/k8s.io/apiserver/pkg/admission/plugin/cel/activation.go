@@ -32,18 +32,18 @@ import (
 
 // newActivation creates an activation for CEL admission plugins from the given request, admission chain and
 // variable binding information.
-func newActivation(compositionCtx CompositionContext, versionedAttr *admission.VersionedAttributes, request *admissionv1.AdmissionRequest, inputs OptionalVariableBindings, namespace *v1.Namespace) (*evaluationActivation, error) {
-	oldObjectVal, err := objectToResolveVal(versionedAttr.VersionedOldObject)
+func newActivation(ctx context.Context, compositionCtx CompositionContext, versionedAttr *admission.VersionedAttributes, request *admissionv1.AdmissionRequest, inputs OptionalVariableBindings, namespace *v1.Namespace) (*evaluationActivation, error) {
+	oldObjectVal, err := objectToResolveVal(ctx, versionedAttr.VersionedOldObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare oldObject variable for evaluation: %w", err)
 	}
-	objectVal, err := objectToResolveVal(versionedAttr.VersionedObject)
+	objectVal, err := objectToResolveVal(ctx, versionedAttr.VersionedObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare object variable for evaluation: %w", err)
 	}
 	var paramsVal, authorizerVal, requestResourceAuthorizerVal any
 	if inputs.VersionedParams != nil {
-		paramsVal, err = objectToResolveVal(inputs.VersionedParams)
+		paramsVal, err = objectToResolveVal(ctx, inputs.VersionedParams)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare params variable for evaluation: %w", err)
 		}
@@ -54,11 +54,11 @@ func newActivation(compositionCtx CompositionContext, versionedAttr *admission.V
 		requestResourceAuthorizerVal = library.NewResourceAuthorizerVal(versionedAttr.GetUserInfo(), inputs.Authorizer, versionedAttr)
 	}
 
-	requestVal, err := convertObjectToUnstructured(request)
+	requestVal, err := convertObjectToUnstructured(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare request variable for evaluation: %w", err)
 	}
-	namespaceVal, err := objectToResolveVal(namespace)
+	namespaceVal, err := objectToResolveVal(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare namespace variable for evaluation: %w", err)
 	}
