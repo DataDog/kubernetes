@@ -48,6 +48,19 @@ func ContextWithUnstructuredCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, unstructuredCacheKey{}, &sync.Map{})
 }
 
+// ContextWithUnstructuredCacheIfAbsent behaves like ContextWithUnstructuredCache, but is a
+// no-op if ctx already carries a cache. Bound policies sharing one object/oldObject/params
+// (e.g. all policies evaluated for one admission request in dispatcher.Dispatch) should wrap
+// ctx once at that outer scope so conversions are shared across policies, not just across the
+// 4 CEL passes within a single policy's Validate() call. Callers of Validate() that don't go
+// through that outer scope (e.g. tests, or direct callers) still get a cache of their own.
+func ContextWithUnstructuredCacheIfAbsent(ctx context.Context) context.Context {
+	if ctx.Value(unstructuredCacheKey{}) != nil {
+		return ctx
+	}
+	return ContextWithUnstructuredCache(ctx)
+}
+
 // conditionCompiler implement the interface ConditionCompiler.
 type conditionCompiler struct {
 	compiler Compiler

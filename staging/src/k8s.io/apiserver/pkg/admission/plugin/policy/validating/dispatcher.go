@@ -31,6 +31,7 @@ import (
 	utiljson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apiserver/pkg/admission"
 	admissionauthorizer "k8s.io/apiserver/pkg/admission/plugin/authorizer"
+	"k8s.io/apiserver/pkg/admission/plugin/cel"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/generic"
 	celmetrics "k8s.io/apiserver/pkg/admission/plugin/policy/validating/metrics"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
@@ -70,6 +71,12 @@ func (c *dispatcher) Start(ctx context.Context) error {
 
 // Dispatch implements generic.Dispatcher.
 func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces, hooks []PolicyHook) error {
+	// All bound policies evaluated below validate against the same object/oldObject/params
+	// for this one admission request. Share one set of unstructured conversions across all
+	// of them (not just across the 4 CEL passes within a single policy's Validate() call),
+	// so the request pays for at most one conversion per distinct object instead of one per
+	// bound policy.
+	ctx = cel.ContextWithUnstructuredCache(ctx)
 
 	var deniedDecisions []policyDecisionWithMetadata
 

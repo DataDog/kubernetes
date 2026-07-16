@@ -78,8 +78,11 @@ func (v *validator) Validate(ctx context.Context, matchedResource schema.GroupVe
 	// matchConditions, validations, messageExpression and auditAnnotations are each a
 	// separate CEL evaluation pass below, but all evaluate against the same
 	// object/oldObject/params. Share one set of unstructured conversions across all of
-	// them instead of each pass repeating the same reflection-based conversion.
-	ctx = cel.ContextWithUnstructuredCache(ctx)
+	// them instead of each pass repeating the same reflection-based conversion. Callers
+	// that evaluate multiple bound policies against the same object (e.g. dispatcher.Dispatch)
+	// should wrap ctx with this upfront so the cache is shared across policies too; this
+	// falls back to a fresh cache when that hasn't happened, so standalone callers still benefit.
+	ctx = cel.ContextWithUnstructuredCacheIfAbsent(ctx)
 
 	var f v1.FailurePolicyType
 	if v.failPolicy == nil {
