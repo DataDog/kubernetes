@@ -81,6 +81,18 @@ func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o adm
 	// bound policy.
 	ctx = cel.ContextWithUnstructuredCache(ctx)
 
+	// Bound policies that match the same GroupVersionKind of the incoming object all need an
+	// identical *admission.VersionedAttributes (it's a pure function of a, matchKind, and o,
+	// none of which vary across policies in this Dispatch call), but the per-hook loop below
+	// previously rebuilt one from scratch for every policy. That not only repeated the
+	// version-conversion work itself, it also defeated the unstructured-conversion cache above:
+	// each rebuilt VersionedAttributes has its own VersionedObject/VersionedOldObject pointers,
+	// so the cache (keyed by pointer identity) saw a fresh miss per policy despite the shared ctx.
+	// Building at most one VersionedAttributes per distinct matchKind lets policies sharing a
+	// GVK also share those pointers, so the unstructured cache actually reuses conversions
+	// across policies instead of just across one policy's 4 CEL passes.
+	versionedAttrsByKind := map[schema.GroupVersionKind]*admission.VersionedAttributes{}
+
 	var deniedDecisions []policyDecisionWithMetadata
 
 	addConfigError := func(err error, definition *admissionregistrationv1.ValidatingAdmissionPolicy, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding) {
@@ -130,7 +142,9 @@ func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o adm
 		// versionedAttributes will be set to non-nil inside of the loop, but
 		// is scoped outside of the param loop so we only convert once. We defer
 		// conversion so that it is only performed when we know a policy matches,
-		// saving the cost of converting non-matching requests.
+		// saving the cost of converting non-matching requests. It's seeded from
+		// versionedAttrsByKind so policies sharing matchKind with an earlier hook
+		// in this Dispatch call reuse that conversion instead of redoing it.
 		var versionedAttr *admission.VersionedAttributes
 
 		definition := hook.Policy
@@ -148,6 +162,8 @@ func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o adm
 			addConfigError(hook.ConfigurationError, definition, nil)
 			continue
 		}
+
+		versionedAttr = versionedAttrsByKind[matchKind]
 
 		auditAnnotationCollector := newAuditAnnotationCollector()
 		for _, binding := range hook.Bindings {
@@ -184,6 +200,7 @@ func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o adm
 					continue
 				}
 				versionedAttr = va
+				versionedAttrsByKind[matchKind] = va
 			}
 
 			var validationResults []ValidateResult
