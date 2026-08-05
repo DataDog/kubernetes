@@ -21,7 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +38,7 @@ import (
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/warning"
+	"k8s.io/component-base/tracing"
 	"k8s.io/klog/v2"
 )
 
@@ -209,9 +212,12 @@ func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o adm
 					}
 				}
 
+				vapCtx, vapSpan := tracing.Start(ctx, "VAP validate "+definition.Name,
+					attribute.String("policy", definition.Name),
+					attribute.String("binding", binding.Name))
 				validationResults = append(validationResults,
 					hook.Evaluator.Validate(
-						ctx,
+						vapCtx,
 						matchResource,
 						versionedAttr,
 						p,
@@ -220,6 +226,7 @@ func (c *dispatcher) Dispatch(ctx context.Context, a admission.Attributes, o adm
 						authz,
 					),
 				)
+				vapSpan.End(500 * time.Millisecond)
 			}
 
 			for _, validationResult := range validationResults {
