@@ -24,6 +24,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/component-base/metrics"
 	"k8s.io/component-base/metrics/legacyregistry"
+	"k8s.io/component-base/tracing"
 )
 
 // WebhookRejectionErrorType defines different error types that happen in a webhook rejection.
@@ -93,6 +94,12 @@ func (p pluginHandlerWithMetrics) Admit(ctx context.Context, a admission.Attribu
 		return nil
 	}
 
+	if len(p.extraLabels) > 0 {
+		newCtx, span := tracing.Start(ctx, "admission admit "+p.extraLabels[0])
+		defer span.End(500 * time.Millisecond)
+		ctx = newCtx
+	}
+
 	start := time.Now()
 	err := mutatingHandler.Admit(ctx, a, o)
 	p.observer(ctx, time.Since(start), err != nil, a, stepAdmit, p.extraLabels...)
@@ -104,6 +111,12 @@ func (p pluginHandlerWithMetrics) Validate(ctx context.Context, a admission.Attr
 	validatingHandler, ok := p.Interface.(admission.ValidationInterface)
 	if !ok {
 		return nil
+	}
+
+	if len(p.extraLabels) > 0 {
+		newCtx, span := tracing.Start(ctx, "admission validate "+p.extraLabels[0])
+		defer span.End(500 * time.Millisecond)
+		ctx = newCtx
 	}
 
 	start := time.Now()
