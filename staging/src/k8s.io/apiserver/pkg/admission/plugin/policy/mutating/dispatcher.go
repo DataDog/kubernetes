@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"k8s.io/api/admissionregistration/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -41,6 +42,7 @@ import (
 	webhookgeneric "k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"k8s.io/component-base/tracing"
 )
 
 func NewDispatcher(a authorizer.Authorizer, m *matching.Matcher, tcm patch.TypeConverterManager) generic.Dispatcher[PolicyHook] {
@@ -189,7 +191,11 @@ func (d *dispatcher) dispatchInvocations(
 			patcher := invocation.Evaluator.Mutators[mutationIndex]
 			optionalVariables := cel.OptionalVariableBindings{VersionedParams: invocation.Param, Authorizer: authz}
 			startTime := time.Now()
-			err = d.dispatchOne(ctx, patcher, o, versionedAttr, namespace, invocation.Resource, optionalVariables)
+			mapCtx, mapSpan := tracing.Start(ctx, "MAP mutate "+invocation.Policy.Name,
+				attribute.String("policy", invocation.Policy.Name),
+				attribute.String("binding", invocation.Binding.Name))
+			err = d.dispatchOne(mapCtx, patcher, o, versionedAttr, namespace, invocation.Resource, optionalVariables)
+			mapSpan.End(500 * time.Millisecond)
 			elapsed := time.Since(startTime)
 
 			if err != nil {
