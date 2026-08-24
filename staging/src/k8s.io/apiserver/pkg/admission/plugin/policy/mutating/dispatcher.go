@@ -139,9 +139,9 @@ func (d *dispatcher) dispatchInvocations(
 	// Should loop through invocations, handling possible error and invoking
 	// evaluator to apply patch, also should handle re-invocations
 	for _, invocation := range invocations {
-		if invocation.Evaluator.CompositionEnv != nil {
-			ctx = invocation.Evaluator.CompositionEnv.CreateContext(ctx)
-		}
+		// Composition context is now created inside CompositedEvaluator.ForInput,
+		// not here, so that tracing.Start (which wraps ctx below) does not break
+		// the ctx.(CompositionContext) type assertion in mutatingEvaluator.ForInput.
 		if len(invocation.Evaluator.Mutators) != len(invocation.Policy.Spec.Mutations) {
 			// This would be a bug. The compiler should always return exactly as
 			// many evaluators as there are mutations
