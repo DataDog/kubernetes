@@ -116,6 +116,15 @@ func (c *CompositedCompiler) CompileMutatingEvaluator(expression ExpressionAcces
 	}
 }
 
+// ForInput wraps the context with the composition environment before delegating
+// to the embedded MutatingEvaluator. This mirrors CompositedConditionEvaluator.ForInput
+// and ensures variables are available even when the caller wraps ctx with tracing
+// spans (e.g. tracing.Start) between the dispatcher's CreateContext call and ForInput.
+func (f *CompositedEvaluator) ForInput(ctx context.Context, versionedAttr *admission.VersionedAttributes, request *v1.AdmissionRequest, optionalVars OptionalVariableBindings, namespace *corev1.Namespace, runtimeCELCostBudget int64) (EvaluationResult, int64, error) {
+	ctx = f.compositionEnv.CreateContext(ctx)
+	return f.MutatingEvaluator.ForInput(ctx, versionedAttr, request, optionalVars, namespace, runtimeCELCostBudget)
+}
+
 type CompositionEnv struct {
 	*environment.EnvSet
 
