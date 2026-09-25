@@ -51,6 +51,7 @@ const (
 	PLEGDiscardEventsKey               = "pleg_discard_events"
 	PLEGRelistIntervalKey              = "pleg_relist_interval_seconds"
 	PLEGLastSeenKey                    = "pleg_last_seen_seconds"
+	PLEGPodRelistDurationKey           = "pleg_pod_relist_duration_seconds"
 	EventedPLEGConnErrKey              = "evented_pleg_connection_error_count"
 	EventedPLEGConnKey                 = "evented_pleg_connection_success_count"
 	EventedPLEGConnLatencyKey          = "evented_pleg_connection_latency_seconds"
@@ -100,6 +101,7 @@ const (
 	StartedPodsTotalKey             = "started_pods_total"
 	StartedPodsErrorsTotalKey       = "started_pods_errors_total"
 	StartedContainersTotalKey       = "started_containers_total"
+	TerminatedContainersTotalKey    = "terminated_containers_total"
 	StartedContainersErrorsTotalKey = "started_containers_errors_total"
 
 	// Metrics to track HostProcess container usage by this kubelet
@@ -112,6 +114,23 @@ const (
 
 	// Metrics to track ephemeral container usage by this kubelet
 	ManagedEphemeralContainersKey = "managed_ephemeral_containers"
+
+	// Metrics to track resource managers allocation
+	ResourceManagerAllocationTotalKey = "resource_manager_allocations_total"
+
+	ResourceManagerAllocationErrorsTotalKey = "resource_manager_allocation_errors_total"
+
+	ResourceManagerContainerAssignmentsKey = "resource_manager_container_assignments"
+
+	ResourceManagerPod  = "pod"
+	ResourceManagerNode = "node"
+
+	ResourceManagerCPU    = "cpu"
+	ResourceManagerMemory = "memory"
+
+	ResourceManagerExclusiveNode = "node_exclusive"
+	ResourceManagerSharedPod     = "pod_shared"
+	ResourceManagerExclusivePod  = "pod_exclusive"
 
 	// Metrics to track the CPU manager behavior
 	CPUManagerPinningRequestsTotalKey         = "cpu_manager_pinning_requests_total"
@@ -146,6 +165,10 @@ const (
 	DRAOperationsDurationKey     = "operations_duration_seconds"
 	DRAGRPCOperationsDurationKey = "grpc_operations_duration_seconds"
 
+	// Metric keys for MemoryQoS
+	MemoryQoSNodeMemoryMinBytesKey = "memory_qos_node_memory_min_bytes"
+	MemoryQoSNodeMemoryLowBytesKey = "memory_qos_node_memory_low_bytes"
+
 	// Values used in metric labels
 	Container          = "container"
 	InitContainer      = "init_container"
@@ -177,8 +200,18 @@ const (
 	PodInProgressResizesKey          = "pod_in_progress_resizes"
 	PodDeferredAcceptedResizesKey    = "pod_deferred_accepted_resizes_total"
 
+	// Metric keys for pod status batching.
+	PodStatusBatchCoalescedKey     = "pod_status_batch_coalesced_total"
+	PodStatusBatchDelayKey         = "pod_status_batch_delay_seconds"
+	PodStatusBatchPendingKey       = "pod_status_batch_pending_pods"
+	PodStatusBatchBypassKey        = "pod_status_batch_bypass_total"
+	PodStatusBatchNotifyDroppedKey = "pod_status_batch_notify_dropped_total"
+
 	// Metric key for podcertificate states.
 	PodCertificateStatesKey = "podcertificate_states"
+
+	// Metric key for podsapi
+	PodWatchEventsDroppedKey = "pod_watch_events_dropped_total"
 )
 
 type imageSizeBucket struct {
@@ -383,6 +416,17 @@ var (
 			Subsystem:      KubeletSubsystem,
 			Name:           PLEGLastSeenKey,
 			Help:           "Timestamp in seconds when PLEG was last seen active.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+	// PLEGPodRelistDuration is a Histogram that tracks the duration (in seconds) it takes for relisting a single pod in the Kubelet's
+	// Pod Lifecycle Event Generator (PLEG).
+	PLEGPodRelistDuration = metrics.NewHistogram(
+		&metrics.HistogramOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PLEGPodRelistDurationKey,
+			Help:           "Duration in seconds for relisting a single pod in PLEG.",
+			Buckets:        metrics.DefBuckets,
 			StabilityLevel: metrics.ALPHA,
 		},
 	)
@@ -729,6 +773,16 @@ var (
 		},
 		[]string{"container_type"},
 	)
+	// TerminatedContainersTotal is a counter that tracks the number of container terminations
+	TerminatedContainersTotal = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           TerminatedContainersTotalKey,
+			Help:           "Cumulative number of container terminations.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"container_type", "exit_code", "reason"},
+	)
 	// StartedContainersTotal is a counter that tracks the number of errors creating containers
 	StartedContainersErrorsTotal = metrics.NewCounterVec(
 		&metrics.CounterOpts{
@@ -903,6 +957,26 @@ var (
 			Subsystem:      KubeletSubsystem,
 			Name:           MemoryManagerPinningErrorsTotalKey,
 			Help:           "The number of memory pages allocations which required pinning that failed.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	// MemoryQoSNodeMemoryMinBytes tracks total cgroup v2 memory.min (hard protection) for Guaranteed pods.
+	MemoryQoSNodeMemoryMinBytes = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           MemoryQoSNodeMemoryMinBytesKey,
+			Help:           "Total cgroup v2 memory.min in bytes for Guaranteed pods. This memory is hard-reserved and never reclaimed by the kernel.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	// MemoryQoSNodeMemoryLowBytes tracks total cgroup v2 memory.low (soft protection) for Burstable pods.
+	MemoryQoSNodeMemoryLowBytes = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           MemoryQoSNodeMemoryLowBytesKey,
+			Help:           "Total cgroup v2 memory.low in bytes for Burstable pods. This memory is soft-reserved and may be reclaimed under extreme pressure.",
 			StabilityLevel: metrics.ALPHA,
 		},
 	)
@@ -1193,6 +1267,96 @@ var (
 		},
 		[]string{"retry_trigger"},
 	)
+
+	PodStatusBatchCoalesced = metrics.NewCounter(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchCoalescedKey,
+			Help:           "Number of intermediate pod status updates absorbed by batching.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchDelay = metrics.NewHistogram(
+		&metrics.HistogramOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchDelayKey,
+			Help:           "Actual delay in seconds from the first pending status change to the batch flush.",
+			Buckets:        []float64{0.1, 0.25, 0.5, 1, 2, 3, 5},
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchPending = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchPendingKey,
+			Help:           "Number of pods with unflushed batched status updates.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchBypass = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchBypassKey,
+			Help:           "Number of pod status updates that bypassed batching. The reason label is one of: force, pod_ready, containers_ready, terminal, unknown.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"reason"},
+	)
+
+	PodStatusBatchNotifyDropped = metrics.NewCounter(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchNotifyDroppedKey,
+			Help:           "Number of pod status update notifications dropped because the syncer channel was already signaled. A non-zero value is expected under load and is not by itself a problem; sustained growth that outpaces flushes indicates a stuck syncer.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	// ResourceManagerAllocationsTotal counts the total number of exclusive resource
+	// allocations performed by a manager. The `source` label distinguishes between
+	// allocations drawn from the node-level pool versus a pre-allocated pod-level pool.
+	ResourceManagerAllocationsTotal = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Name: ResourceManagerAllocationTotalKey,
+			Help: "Number of exclusive resource allocations performed by a resource manager.",
+		},
+		[]string{"resource_name", "source"},
+	)
+
+	// ResourceManagerAllocationErrorsTotal counts errors encountered during exclusive
+	// resource allocation, distinguished by the intended allocation source.
+	ResourceManagerAllocationErrorsTotal = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Name: ResourceManagerAllocationErrorsTotalKey,
+			Help: "Number of errors encountered during exclusive resource allocation.",
+		},
+		[]string{"resource_name", "source"},
+	)
+
+	// ResourceManagerContainerAssignments counts the total number of containers with
+	// a specific type of resource assignment. This provides visibility into how many
+	// containers were allocated with exclusive resources (from the node or pod pool)
+	// versus the pod-level shared pool.
+	ResourceManagerContainerAssignments = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Name: ResourceManagerContainerAssignmentsKey,
+			Help: "Number of containers with a specific type of resource assignment.",
+		},
+		[]string{"resource_name", "assignment_type"},
+	)
+
+	// PodWatchEventsDroppedTotal tracks the number of dropped pod watch events.
+	PodWatchEventsDroppedTotal = metrics.NewCounter(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodWatchEventsDroppedKey,
+			Help:           "Cumulative number of pod watch events dropped.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
 )
 
 var registerMetrics sync.Once
@@ -1222,6 +1386,7 @@ func Register() {
 		legacyregistry.MustRegister(PLEGDiscardEvents)
 		legacyregistry.MustRegister(PLEGRelistInterval)
 		legacyregistry.MustRegister(PLEGLastSeen)
+		legacyregistry.MustRegister(PLEGPodRelistDuration)
 		legacyregistry.MustRegister(EventedPLEGConnErr)
 		legacyregistry.MustRegister(EventedPLEGConn)
 		legacyregistry.MustRegister(EventedPLEGConnLatency)
@@ -1247,10 +1412,8 @@ func Register() {
 		legacyregistry.MustRegister(PodResourcesEndpointRequestsGetAllocatableCount)
 		legacyregistry.MustRegister(PodResourcesEndpointErrorsListCount)
 		legacyregistry.MustRegister(PodResourcesEndpointErrorsGetAllocatableCount)
-		if utilfeature.DefaultFeatureGate.Enabled(features.KubeletPodResourcesGet) {
-			legacyregistry.MustRegister(PodResourcesEndpointRequestsGetCount)
-			legacyregistry.MustRegister(PodResourcesEndpointErrorsGetCount)
-		}
+		legacyregistry.MustRegister(PodResourcesEndpointRequestsGetCount)
+		legacyregistry.MustRegister(PodResourcesEndpointErrorsGetCount)
 		if utilfeature.DefaultFeatureGate.Enabled(features.UserNamespacesSupport) {
 			legacyregistry.MustRegister(StartedUserNamespacedPodsTotal)
 			legacyregistry.MustRegister(StartedUserNamespacedPodsErrorsTotal)
@@ -1258,6 +1421,7 @@ func Register() {
 		legacyregistry.MustRegister(StartedPodsTotal)
 		legacyregistry.MustRegister(StartedPodsErrorsTotal)
 		legacyregistry.MustRegister(StartedContainersTotal)
+		legacyregistry.MustRegister(TerminatedContainersTotal)
 		legacyregistry.MustRegister(StartedContainersErrorsTotal)
 		legacyregistry.MustRegister(StartedHostProcessContainersTotal)
 		legacyregistry.MustRegister(StartedHostProcessContainersErrorsTotal)
@@ -1272,6 +1436,10 @@ func Register() {
 		legacyregistry.MustRegister(ContainerAlignedComputeResourcesFailure)
 		legacyregistry.MustRegister(MemoryManagerPinningRequestTotal)
 		legacyregistry.MustRegister(MemoryManagerPinningErrorsTotal)
+		if utilfeature.DefaultFeatureGate.Enabled(features.MemoryQoS) {
+			legacyregistry.MustRegister(MemoryQoSNodeMemoryMinBytes)
+			legacyregistry.MustRegister(MemoryQoSNodeMemoryLowBytes)
+		}
 		legacyregistry.MustRegister(TopologyManagerAdmissionRequestsTotal)
 		legacyregistry.MustRegister(TopologyManagerAdmissionErrorsTotal)
 		legacyregistry.MustRegister(TopologyManagerAdmissionDuration)
@@ -1303,6 +1471,14 @@ func Register() {
 			legacyregistry.MustRegister(ImageVolumeMountedErrorsTotal)
 		}
 
+		if utilfeature.DefaultFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+			legacyregistry.MustRegister(PodStatusBatchCoalesced)
+			legacyregistry.MustRegister(PodStatusBatchDelay)
+			legacyregistry.MustRegister(PodStatusBatchPending)
+			legacyregistry.MustRegister(PodStatusBatchBypass)
+			legacyregistry.MustRegister(PodStatusBatchNotifyDropped)
+		}
+
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 			legacyregistry.MustRegister(ContainerRequestedResizes)
 			legacyregistry.MustRegister(PodResizeDurationMilliseconds)
@@ -1311,6 +1487,14 @@ func Register() {
 			legacyregistry.MustRegister(PodInProgressResizes)
 			legacyregistry.MustRegister(PodDeferredAcceptedResizes)
 		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResourceManagers) {
+			legacyregistry.MustRegister(ResourceManagerAllocationsTotal)
+			legacyregistry.MustRegister(ResourceManagerAllocationErrorsTotal)
+			legacyregistry.MustRegister(ResourceManagerContainerAssignments)
+		}
+
+		legacyregistry.MustRegister(PodWatchEventsDroppedTotal)
 	})
 }
 

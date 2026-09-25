@@ -91,6 +91,8 @@ func (*RootPaths) ProtoMessage() {}
 
 func (*ServerAddressByClientCIDR) ProtoMessage() {}
 
+func (*ShardInfo) ProtoMessage() {}
+
 func (*Status) ProtoMessage() {}
 
 func (*StatusCause) ProtoMessage() {}

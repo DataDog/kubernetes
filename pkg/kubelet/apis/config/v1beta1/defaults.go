@@ -41,7 +41,8 @@ const (
 	DefaultVolumePluginDir       = "/usr/libexec/kubernetes/kubelet-plugins/volume/exec/"
 	DefaultPodLogsDir            = "/var/log/pods"
 	// See https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/2570-memory-qos
-	DefaultMemoryThrottlingFactor = 0.9
+	DefaultMemoryThrottlingFactor  = 0.9
+	DefaultMemoryReservationPolicy = kubeletconfigv1beta1.NoneMemoryReservationPolicy
 	// MaxContainerBackOff is the max backoff period for container restarts, exported for the e2e test
 	MaxContainerBackOff = 300 * time.Second
 )
@@ -295,6 +296,9 @@ func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfigura
 	if obj.MemoryThrottlingFactor == nil {
 		obj.MemoryThrottlingFactor = ptr.To(DefaultMemoryThrottlingFactor)
 	}
+	if obj.MemoryReservationPolicy == "" {
+		obj.MemoryReservationPolicy = DefaultMemoryReservationPolicy
+	}
 	if obj.RegisterNode == nil {
 		obj.RegisterNode = ptr.To(true)
 	}
@@ -311,6 +315,12 @@ func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfigura
 	if localFeatureGate.Enabled(features.KubeletCrashLoopBackOffMax) {
 		if obj.CrashLoopBackOff.MaxContainerRestartPeriod == nil {
 			obj.CrashLoopBackOff.MaxContainerRestartPeriod = &metav1.Duration{Duration: MaxContainerBackOff}
+		}
+	}
+
+	if localFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+		if obj.PodStatusUpdateBatchWindow == zeroDuration {
+			obj.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 1 * time.Second}
 		}
 	}
 

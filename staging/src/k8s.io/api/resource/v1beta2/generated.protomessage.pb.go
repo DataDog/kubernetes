@@ -75,11 +75,23 @@ func (*DeviceSubRequest) ProtoMessage() {}
 
 func (*DeviceTaint) ProtoMessage() {}
 
+func (*DeviceTaintRule) ProtoMessage() {}
+
+func (*DeviceTaintRuleList) ProtoMessage() {}
+
+func (*DeviceTaintRuleSpec) ProtoMessage() {}
+
+func (*DeviceTaintRuleStatus) ProtoMessage() {}
+
+func (*DeviceTaintSelector) ProtoMessage() {}
+
 func (*DeviceToleration) ProtoMessage() {}
 
 func (*ExactDeviceRequest) ProtoMessage() {}
 
 func (*NetworkDeviceData) ProtoMessage() {}
+
+func (*NodeAllocatableResourceMapping) ProtoMessage() {}
 
 func (*OpaqueDeviceConfiguration) ProtoMessage() {}
 

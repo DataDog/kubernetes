@@ -36,3 +36,13 @@ func (*DeviceTaintRuleSpec) ProtoMessage() {}
 func (*DeviceTaintRuleStatus) ProtoMessage() {}
 
 func (*DeviceTaintSelector) ProtoMessage() {}
+
+func (*PoolStatus) ProtoMessage() {}
+
+func (*ResourcePoolStatusRequest) ProtoMessage() {}
+
+func (*ResourcePoolStatusRequestList) ProtoMessage() {}
+
+func (*ResourcePoolStatusRequestSpec) ProtoMessage() {}
+
+func (*ResourcePoolStatusRequestStatus) ProtoMessage() {}

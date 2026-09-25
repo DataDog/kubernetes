@@ -17,6 +17,7 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"context"
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
@@ -28,7 +29,7 @@ import (
 )
 
 // determineEffectiveSecurityContext gets container's security context from v1.Pod and v1.Container.
-func (m *kubeGenericRuntimeManager) determineEffectiveSecurityContext(pod *v1.Pod, container *v1.Container, uid *int64, username string) (*runtimeapi.LinuxContainerSecurityContext, error) {
+func (m *kubeGenericRuntimeManager) determineEffectiveSecurityContext(ctx context.Context, pod *v1.Pod, container *v1.Container, uid *int64, username string) (*runtimeapi.LinuxContainerSecurityContext, error) {
 	effectiveSc := securitycontext.DetermineEffectiveSecurityContext(pod, container)
 	if effectiveSc.Capabilities != nil && len(effectiveSc.Capabilities.Ambient) > 0 && !utilfeature.DefaultFeatureGate.Enabled(features.AmbientCapabilities) {
 		return nil, fmt.Errorf("container %q requests ambient capabilities but the AmbientCapabilities feature gate is disabled", container.Name)
@@ -62,7 +63,7 @@ func (m *kubeGenericRuntimeManager) determineEffectiveSecurityContext(pod *v1.Po
 	}
 
 	// set namespace options and supplemental groups.
-	namespaceOptions, err := runtimeutil.NamespacesForPod(pod, m.runtimeHelper, m.runtimeClassManager)
+	namespaceOptions, err := runtimeutil.NamespacesForPod(ctx, pod, m.runtimeHelper, m.runtimeClassManager)
 	if err != nil {
 		return nil, err
 	}

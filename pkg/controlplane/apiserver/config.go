@@ -49,6 +49,7 @@ import (
 	clientgoclientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/keyutil"
 	basecompatibility "k8s.io/component-base/compatibility"
+	metricsfeatures "k8s.io/component-base/metrics/features"
 	aggregatorapiserver "k8s.io/kube-aggregator/pkg/apiserver"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
@@ -131,7 +132,7 @@ func BuildGenericConfig(
 		return
 	}
 
-	if lastErr = s.SecureServing.ApplyTo(&genericConfig.SecureServing, &genericConfig.LoopbackClientConfig); lastErr != nil {
+	if lastErr = s.SecureServing.ApplyToConfig(genericConfig); lastErr != nil {
 		return
 	}
 
@@ -288,6 +289,7 @@ func CreateConfig(
 ) {
 	proxyTransport := CreateProxyTransport()
 
+	metricsfeatures.ApplyFeatureGates(utilfeature.DefaultFeatureGate)
 	opts.Metrics.Apply()
 	serviceaccount.RegisterMetrics()
 
@@ -330,7 +332,9 @@ func CreateConfig(
 				opts.PeerAdvertiseAddress,
 				genericConfig.APIServerID,
 				config.Extra.PeerEndpointLeaseReconciler,
-				config.Generic.Serializer)
+				config.Generic.Serializer,
+				config.Generic.EgressSelector,
+			)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -360,6 +364,7 @@ func CreateConfig(
 	genericAdmissionConfig := controlplaneadmission.Config{
 		ExternalInformers:    versionedInformers,
 		LoopbackClientConfig: genericConfig.LoopbackClientConfig,
+		APIResourceConfig:    storageFactory.APIResourceConfigSource,
 	}
 	genericInitializers, err := genericAdmissionConfig.New(proxyTransport, genericConfig.EgressSelector, serviceResolver, genericConfig.TracerProvider)
 	if err != nil {

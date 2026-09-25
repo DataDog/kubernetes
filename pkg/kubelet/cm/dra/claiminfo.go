@@ -45,8 +45,6 @@ type ClaimInfo struct {
 
 // claimInfoCache is a cache of processed resource claims keyed by namespace/claimname.
 type claimInfoCache struct {
-	logger klog.Logger
-
 	sync.RWMutex
 	checkpointer state.Checkpointer
 	claimInfo    map[string]*ClaimInfo
@@ -94,6 +92,22 @@ func (info *ClaimInfo) addDevice(driverName string, deviceState state.Device) {
 	info.DriverState[driverName] = driverState
 }
 
+// resetDevices clears the device list for a given driver, keeping the
+// entry present in DriverState. Used to discard stale devices left over
+// from a previous NodePrepareResources attempt before applying the
+// new response.
+func (info *ClaimInfo) resetDevices(driverName string) {
+	if info.DriverState == nil {
+		return
+	}
+	driverState, ok := info.DriverState[driverName]
+	if !ok {
+		return
+	}
+	driverState.Devices = nil
+	info.DriverState[driverName] = driverState
+}
+
 // addPodReference adds a pod reference to the claim info.
 func (info *ClaimInfo) addPodReference(podUID types.UID) {
 	info.PodUIDs.Insert(string(podUID))
@@ -137,7 +151,7 @@ func (info *ClaimInfo) cdiDevicesAsList(requestName string) []kubecontainer.CDID
 }
 
 // newClaimInfoCache creates a new claim info cache object, pre-populated from a checkpoint (if present).
-func newClaimInfoCache(logger klog.Logger, stateDir, checkpointName string) (*claimInfoCache, error) {
+func newClaimInfoCache(stateDir, checkpointName string) (*claimInfoCache, error) {
 	checkpointer, err := state.NewCheckpointer(stateDir, checkpointName)
 	if err != nil {
 		return nil, fmt.Errorf("could not initialize checkpoint manager, please drain node and remove DRA state file, err: %w", err)
@@ -149,7 +163,6 @@ func newClaimInfoCache(logger klog.Logger, stateDir, checkpointName string) (*cl
 	}
 
 	cache := &claimInfoCache{
-		logger:       logger,
 		checkpointer: checkpointer,
 		claimInfo:    make(map[string]*ClaimInfo),
 	}
@@ -169,11 +182,12 @@ func newClaimInfoCache(logger klog.Logger, stateDir, checkpointName string) (*cl
 
 // withLock runs a function while holding the claimInfoCache lock.
 // It logs changes.
-func (cache *claimInfoCache) withLock(f func() error) error {
+func (cache *claimInfoCache) withLock(logger klog.Logger, f func() error) error {
+	logger = logger.WithName("dra-claiminfo")
 	cache.Lock()
 	defer cache.Unlock()
 
-	if loggerV := cache.logger.V(5); loggerV.Enabled() {
+	if loggerV := logger.V(5); loggerV.Enabled() {
 		claimsInUseBefore := cache.claimsInUse()
 		defer func() {
 			claimsInUseAfter := cache.claimsInUse()
@@ -188,7 +202,7 @@ func (cache *claimInfoCache) withLock(f func() error) error {
 			}
 
 			if changed {
-				cache.logger.V(5).Info("ResourceClaim usage changed", "claimsInUse", delta)
+				logger.V(5).Info("ResourceClaim usage changed", "claimsInUse", delta)
 			}
 		}()
 	}

@@ -582,6 +582,7 @@ func autoConvert_v1beta1_KubeletConfiguration_To_config_KubeletConfiguration(in 
 	out.TLSCertFile = in.TLSCertFile
 	out.TLSPrivateKeyFile = in.TLSPrivateKeyFile
 	out.TLSCipherSuites = *(*[]string)(unsafe.Pointer(&in.TLSCipherSuites))
+	out.TLSCurvePreferences = *(*[]int32)(unsafe.Pointer(&in.TLSCurvePreferences))
 	out.TLSMinVersion = in.TLSMinVersion
 	out.RotateCertificates = in.RotateCertificates
 	out.ServerTLSBootstrap = in.ServerTLSBootstrap
@@ -738,6 +739,7 @@ func autoConvert_v1beta1_KubeletConfiguration_To_config_KubeletConfiguration(in 
 	if err := Convert_v1beta1_CrashLoopBackOffConfig_To_config_CrashLoopBackOffConfig(&in.CrashLoopBackOff, &out.CrashLoopBackOff, s); err != nil {
 		return err
 	}
+	out.PodStatusUpdateBatchWindow = in.PodStatusUpdateBatchWindow
 	out.ReservedMemory = *(*[]config.MemoryReservation)(unsafe.Pointer(&in.ReservedMemory))
 	if err := v1.Convert_Pointer_bool_To_bool(&in.EnableProfilingHandler, &out.EnableProfilingHandler, s); err != nil {
 		return err
@@ -749,6 +751,7 @@ func autoConvert_v1beta1_KubeletConfiguration_To_config_KubeletConfiguration(in 
 		return err
 	}
 	out.MemoryThrottlingFactor = (*float64)(unsafe.Pointer(in.MemoryThrottlingFactor))
+	out.MemoryReservationPolicy = config.MemoryReservationPolicy(in.MemoryReservationPolicy)
 	out.RegisterWithTaints = *(*[]corev1.Taint)(unsafe.Pointer(&in.RegisterWithTaints))
 	if err := v1.Convert_Pointer_bool_To_bool(&in.RegisterNode, &out.RegisterNode, s); err != nil {
 		return err
@@ -790,6 +793,7 @@ func autoConvert_config_KubeletConfiguration_To_v1beta1_KubeletConfiguration(in 
 	out.TLSCertFile = in.TLSCertFile
 	out.TLSPrivateKeyFile = in.TLSPrivateKeyFile
 	out.TLSCipherSuites = *(*[]string)(unsafe.Pointer(&in.TLSCipherSuites))
+	out.TLSCurvePreferences = *(*[]int32)(unsafe.Pointer(&in.TLSCurvePreferences))
 	out.TLSMinVersion = in.TLSMinVersion
 	out.RotateCertificates = in.RotateCertificates
 	out.ServerTLSBootstrap = in.ServerTLSBootstrap
@@ -952,6 +956,7 @@ func autoConvert_config_KubeletConfiguration_To_v1beta1_KubeletConfiguration(in 
 		return err
 	}
 	out.MemoryThrottlingFactor = (*float64)(unsafe.Pointer(in.MemoryThrottlingFactor))
+	out.MemoryReservationPolicy = configv1beta1.MemoryReservationPolicy(in.MemoryReservationPolicy)
 	out.RegisterWithTaints = *(*[]corev1.Taint)(unsafe.Pointer(&in.RegisterWithTaints))
 	if err := v1.Convert_bool_To_Pointer_bool(&in.RegisterNode, &out.RegisterNode, s); err != nil {
 		return err
@@ -968,6 +973,7 @@ func autoConvert_config_KubeletConfiguration_To_v1beta1_KubeletConfiguration(in 
 	if err := Convert_config_CrashLoopBackOffConfig_To_v1beta1_CrashLoopBackOffConfig(&in.CrashLoopBackOff, &out.CrashLoopBackOff, s); err != nil {
 		return err
 	}
+	out.PodStatusUpdateBatchWindow = in.PodStatusUpdateBatchWindow
 	out.UserNamespaces = (*configv1beta1.UserNamespaces)(unsafe.Pointer(in.UserNamespaces))
 	return nil
 }

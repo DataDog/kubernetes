@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 /*
 Copyright 2018 The Kubernetes Authors.
@@ -724,4 +723,65 @@ func createTestNetwork() (*hcn.HostComputeNetwork, error) {
 	network.Ipams[0].Subnets[0].Policies = append(network.Ipams[0].Subnets[0].Policies, spJson)
 
 	return network.Create()
+}
+
+func TestGetAllLoadBalancers_SkipsLoadBalancersWithoutPortMappings(t *testing.T) {
+	testCases := []struct {
+		name         string
+		portMappings []hcn.LoadBalancerPortMapping
+	}{
+		{
+			name:         "nil port mappings",
+			portMappings: nil,
+		},
+		{
+			name:         "empty port mappings",
+			portMappings: []hcn.LoadBalancerPortMapping{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			hcnMock := getHcnMock("L2Bridge")
+			hns := hns{hcn: hcnMock}
+
+			hcnMock.PopulateRawQueriedLoadbalancer(&hcn.HostComputeLoadBalancer{
+				Id:           "LBID-malformed",
+				FrontendVIPs: []string{serviceVip},
+				PortMappings: tc.portMappings,
+			})
+			hcnMock.PopulateRawQueriedLoadbalancer(&hcn.HostComputeLoadBalancer{
+				Id:                   "LBID-valid",
+				FrontendVIPs:         []string{serviceVip},
+				HostComputeEndpoints: []string{"EPID-1"},
+				PortMappings: []hcn.LoadBalancerPortMapping{
+					{
+						Protocol:     uint32(protocol),
+						InternalPort: internalPort,
+						ExternalPort: externalPort,
+					},
+				},
+			})
+
+			loadBalancers, err := hns.getAllLoadBalancers()
+			assert.NoError(t, err)
+
+			hnsIDs := make([]string, 0, len(loadBalancers))
+			for _, lb := range loadBalancers {
+				hnsIDs = append(hnsIDs, lb.hnsID)
+			}
+			assert.ElementsMatch(t, []string{"LBID-valid"}, hnsIDs)
+		})
+	}
+}
+
+func TestGetAllLoadBalancers_AllLoadBalancersWithoutPortMappings(t *testing.T) {
+	hcnMock := getHcnMock("L2Bridge")
+	hns := hns{hcn: hcnMock}
+
+	hcnMock.PopulateRawQueriedLoadbalancer(&hcn.HostComputeLoadBalancer{Id: "LBID-malformed"})
+
+	loadBalancers, err := hns.getAllLoadBalancers()
+	assert.NoError(t, err)
+	assert.Empty(t, loadBalancers)
 }

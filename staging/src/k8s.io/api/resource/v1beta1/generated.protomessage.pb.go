@@ -81,6 +81,8 @@ func (*DeviceToleration) ProtoMessage() {}
 
 func (*NetworkDeviceData) ProtoMessage() {}
 
+func (*NodeAllocatableResourceMapping) ProtoMessage() {}
+
 func (*OpaqueDeviceConfiguration) ProtoMessage() {}
 
 func (*ResourceClaim) ProtoMessage() {}

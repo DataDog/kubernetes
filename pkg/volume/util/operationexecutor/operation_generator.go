@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -290,21 +291,21 @@ func (og *operationGenerator) GenerateAttachVolumeFunc(
 			return volumetypes.NewOperationContext(eventErr, detailedErr, migrated)
 		}
 
+		// Update actual state of world
+		addVolumeNodeErr := actualStateOfWorld.MarkVolumeAsAttached(
+			logger, volumeToAttach.VolumeName, volumeToAttach.VolumeSpec, volumeToAttach.NodeName, devicePath)
+		if addVolumeNodeErr != nil {
+			// On failure, return error. Caller will log and retry.
+			eventErr, detailedErr := volumeToAttach.GenerateError("AttachVolume.MarkVolumeAsAttached failed", addVolumeNodeErr)
+			return volumetypes.NewOperationContext(eventErr, detailedErr, migrated)
+		}
+
 		// Successful attach event is useful for user debugging
 		simpleMsg, _ := volumeToAttach.GenerateMsg("AttachVolume.Attach succeeded", "")
 		for _, pod := range volumeToAttach.ScheduledPods {
 			og.recorder.Eventf(pod, v1.EventTypeNormal, kevents.SuccessfulAttachVolume, "%s", simpleMsg)
 		}
 		klog.Info(volumeToAttach.GenerateMsgDetailed("AttachVolume.Attach succeeded", ""))
-
-		// Update actual state of world
-		addVolumeNodeErr := actualStateOfWorld.MarkVolumeAsAttached(
-			logger, v1.UniqueVolumeName(""), volumeToAttach.VolumeSpec, volumeToAttach.NodeName, devicePath)
-		if addVolumeNodeErr != nil {
-			// On failure, return error. Caller will log and retry.
-			eventErr, detailedErr := volumeToAttach.GenerateError("AttachVolume.MarkVolumeAsAttached failed", addVolumeNodeErr)
-			return volumetypes.NewOperationContext(eventErr, detailedErr, migrated)
-		}
 
 		return volumetypes.NewOperationContext(nil, nil, migrated)
 	}
@@ -586,6 +587,7 @@ func (og *operationGenerator) GenerateMountVolumeFunc(
 			FSGroupChangePolicy: fsGroupChangePolicy,
 			Recorder:            og.recorder,
 			SELinuxLabel:        volumeToMount.SELinuxLabel,
+			ReconstructedVolume: actualStateOfWorld.IsVolumeReconstructed(volumeToMount.VolumeName, volumeToMount.PodName),
 			IsRemount:           isRemount,
 		})
 		// Update actual state of world
@@ -1500,12 +1502,10 @@ func (og *operationGenerator) verifyVolumeIsSafeToDetach(
 		return volumeToDetach.GenerateErrorDetailed("DetachVolume failed fetching node from API server", fetchErr)
 	}
 
-	for _, inUseVolume := range node.Status.VolumesInUse {
-		if inUseVolume == volumeToDetach.VolumeName {
-			return volumeToDetach.GenerateErrorDetailed(
-				"DetachVolume failed",
-				fmt.Errorf("volume is still in use by node, according to Node status"))
-		}
+	if slices.Contains(node.Status.VolumesInUse, volumeToDetach.VolumeName) {
+		return volumeToDetach.GenerateErrorDetailed(
+			"DetachVolume failed",
+			fmt.Errorf("volume is still in use by node, according to Node status"))
 	}
 
 	// Volume is not marked as in use by node

@@ -181,6 +181,8 @@ func (*ISCSIVolumeSource) ProtoMessage() {}
 
 func (*ImageVolumeSource) ProtoMessage() {}
 
+func (*ImageVolumeStatus) ProtoMessage() {}
+
 func (*KeyToPath) ProtoMessage() {}
 
 func (*Lifecycle) ProtoMessage() {}
@@ -226,6 +228,8 @@ func (*Node) ProtoMessage() {}
 func (*NodeAddress) ProtoMessage() {}
 
 func (*NodeAffinity) ProtoMessage() {}
+
+func (*NodeAllocatableResourceClaimStatus) ProtoMessage() {}
 
 func (*NodeCondition) ProtoMessage() {}
 
@@ -330,6 +334,8 @@ func (*PodResourceClaim) ProtoMessage() {}
 func (*PodResourceClaimStatus) ProtoMessage() {}
 
 func (*PodSchedulingGate) ProtoMessage() {}
+
+func (*PodSchedulingGroup) ProtoMessage() {}
 
 func (*PodSecurityContext) ProtoMessage() {}
 
@@ -489,10 +495,10 @@ func (*VolumeResourceRequirements) ProtoMessage() {}
 
 func (*VolumeSource) ProtoMessage() {}
 
+func (*VolumeStatus) ProtoMessage() {}
+
 func (*VsphereVirtualDiskVolumeSource) ProtoMessage() {}
 
 func (*WeightedPodAffinityTerm) ProtoMessage() {}
 
 func (*WindowsSecurityContextOptions) ProtoMessage() {}
-
-func (*WorkloadReference) ProtoMessage() {}

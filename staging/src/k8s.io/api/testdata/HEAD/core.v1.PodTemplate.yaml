@@ -909,6 +909,8 @@ template:
     schedulerName: schedulerNameValue
     schedulingGates:
     - name: nameValue
+    schedulingGroup:
+      podGroupName: podGroupNameValue
     securityContext:
       appArmorProfile:
         localhostProfile: localhostProfileValue
@@ -1264,7 +1266,3 @@ template:
         storagePolicyID: storagePolicyIDValue
         storagePolicyName: storagePolicyNameValue
         volumePath: volumePathValue
-    workloadRef:
-      name: nameValue
-      podGroup: podGroupValue
-      podGroupReplicaKey: podGroupReplicaKeyValue

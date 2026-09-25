@@ -48,6 +48,7 @@ var (
 		HealthzPort:                            10248,
 		ImageGCHighThresholdPercent:            85,
 		ImageGCLowThresholdPercent:             80,
+		ImageMinimumGCAge:                      metav1.Duration{Duration: 2 * time.Minute},
 		ImagePullCredentialsVerificationPolicy: "NeverVerifyPreloadedImages",
 		IPTablesDropBit:                        15,
 		IPTablesMasqueradeBit:                  14,
@@ -70,8 +71,8 @@ var (
 		ShutdownGracePeriod:                    metav1.Duration{Duration: 30 * time.Second},
 		ShutdownGracePeriodCriticalPods:        metav1.Duration{Duration: 10 * time.Second},
 		MemoryThrottlingFactor:                 ptr.To(0.9),
+		MemoryReservationPolicy:                kubeletconfig.NoneMemoryReservationPolicy,
 		FeatureGates: map[string]bool{
-			"CustomCPUCFSQuotaPeriod":    true,
 			"GracefulNodeShutdown":       true,
 			"MemoryQoS":                  true,
 			"KubeletCrashLoopBackOffMax": true,
@@ -164,7 +165,6 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 	}, {
 		name: "invalid CPUCFSQuotaPeriod",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-			conf.FeatureGates = map[string]bool{"CustomCPUCFSQuotaPeriod": true}
 			conf.CPUCFSQuotaPeriod = metav1.Duration{Duration: 2 * time.Second}
 			return conf
 		},
@@ -416,7 +416,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 	}, {
 		name: "CrashLoopBackOff.MaxContainerRestartPeriod just a little too high",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-			conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true, "CustomCPUCFSQuotaPeriod": true}
+			conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true}
 			conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{
 				// 300.9 seconds
 				MaxContainerRestartPeriod: &metav1.Duration{Duration: 300900 * time.Millisecond},
@@ -428,7 +428,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 		{
 			name: "CrashLoopBackOff.MaxContainerRestartPeriod just a little too low",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-				conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true}
 				conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{
 					// 300.9 seconds
 					MaxContainerRestartPeriod: &metav1.Duration{Duration: 999 * time.Millisecond},
@@ -440,13 +440,13 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 		{
 			name: "KubeletCrashLoopBackOffMax feature gate on, no crashLoopBackOff config, ok",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-				conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true}
 				return conf
 			},
 		}, {
 			name: "KubeletCrashLoopBackOffMax feature gate on, but no crashLoopBackOff.MaxContainerRestartPeriod config",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-				conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true}
 				conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{}
 				return conf
 			},
@@ -565,6 +565,21 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			},
 			errMsg: "invalid configuration: memoryThrottlingFactor 1.1 must be greater than 0 and less than or equal to 1.0",
 		}, {
+			name: "MemoryReservationPolicy requires MemoryQoS",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"MemoryQoS": false}
+				conf.MemoryReservationPolicy = kubeletconfig.TieredReservationMemoryReservationPolicy
+				return conf
+			},
+			errMsg: "invalid configuration: memoryReservationPolicy \"TieredReservation\" requires MemoryQoS feature gate to be enabled",
+		}, {
+			name: "invalid MemoryReservationPolicy",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.MemoryReservationPolicy = "invalid"
+				return conf
+			},
+			errMsg: "invalid configuration: option \"invalid\" specified for memoryReservationPolicy. Valid options are \"None\" or \"TieredReservation\"",
+		}, {
 			name: "invalid Taint.TimeAdded",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
 				now := metav1.Now()
@@ -611,21 +626,38 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			},
 			errMsg: "invalid configuration: Specifying shutdownGracePeriodByPodPriority requires feature gate GracefulNodeShutdownBasedOnPodPriority",
 		}, {
-			name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
+			name: "enableSystemLogQuery is enabled with explicit default NodeLogQuery feature gate enabled",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"NodeLogQuery": true}
+				conf.EnableSystemLogHandler = true
 				conf.EnableSystemLogQuery = true
 				return conf
 			},
-			errMsg: "invalid configuration: NodeLogQuery feature gate is required for enableSystemLogQuery",
+			errMsg: "",
+		}, {
+			name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"NodeLogQuery": false}
+				conf.EnableSystemLogQuery = true
+				return conf
+			},
+			errMsg: "cannot set feature gate NodeLogQuery to false, feature is locked to true",
 		}, {
 			name: "enableSystemLogQuery is enabled without enableSystemLogHandler",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-				conf.FeatureGates = map[string]bool{"NodeLogQuery": true}
 				conf.EnableSystemLogHandler = false
 				conf.EnableSystemLogQuery = true
 				return conf
 			},
 			errMsg: "invalid configuration: enableSystemLogHandler is required for enableSystemLogQuery",
+		}, {
+			name: "enableSystemLogQuery is enabled with enableSystemLogHandler",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.EnableSystemLogHandler = true
+				conf.EnableSystemLogQuery = true
+				return conf
+			},
+			errMsg: "",
 		}, {
 			name: "imageMaximumGCAge should not be negative",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -718,7 +750,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 				conf.ImagePullCredentialsVerificationPolicy = "invalid"
 				return conf
 			},
-			errMsg: `option "invalid" specified for imagePullCredentialsVerificationPolicy. Valid options are "NeverVerify", "NeverVerifyPreloadedImages", "NeverVerifyAllowlistedImages" or "AlwaysVerify"]`,
+			errMsg: `option "invalid" specified for imagePullCredentialsVerificationPolicy. Valid options are "NeverVerify", "NeverVerifyPreloadedImages", "NeverVerifyAllowlistedImages" or "AlwaysVerify"`,
 		}, {
 			name: "invalid PreloadedImagesVerificationAllowlist configuration - featuregate enabled",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -727,7 +759,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 				conf.PreloadedImagesVerificationAllowlist = []string{"test.test/repo"}
 				return conf
 			},
-			errMsg: "can't set `preloadedImagesVerificationAllowlist` if `imagePullCredentialsVertificationPolicy` is not \"NeverVerifyAllowlistedImages\"]",
+			errMsg: "can't set `preloadedImagesVerificationAllowlist` if `imagePullCredentialsVertificationPolicy` is not \"NeverVerifyAllowlistedImages\"",
 		}, {
 			name: "invalid PreloadedImagesVerificationAllowlist configuration - featuregate disabled",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -751,6 +783,114 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 				return conf
 			},
 			errMsg: "unrecognized feature gate: invalid",
+		}, {
+			name: "invalid configuration: invalid ImageMinimumGCAge",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.ImageMinimumGCAge = metav1.Duration{Duration: -1}
+				return conf
+			},
+			errMsg: "invalid configuration: imageMinimumGCAge -1ns must not be negative",
+		}, {
+			name: "valid ImageMinimumGCAge set to default 1ns",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				// Verify that values other than the default are accepted.
+				conf.ImageMinimumGCAge = metav1.Duration{Duration: 1 * time.Nanosecond}
+				return conf
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validation.ValidateKubeletConfiguration(tc.configure(successConfig.DeepCopy()), featureGate)
+
+			if len(tc.errMsg) == 0 {
+				if errs != nil {
+					t.Errorf("unexpected error: %s", errs)
+				}
+
+				return
+			}
+
+			if errs == nil {
+				t.Errorf("expected error: %s", tc.errMsg)
+				return
+			}
+
+			if got := errs.Error(); !strings.Contains(got, tc.errMsg) {
+				t.Errorf("unexpected error: %s expected to contain %s", got, tc.errMsg)
+			}
+		})
+	}
+}
+
+func TestValidateKubeletConfiguration_PodStatusBatchWindow(t *testing.T) {
+	featureGate := utilfeature.DefaultFeatureGate.DeepCopy()
+	logsapi.AddFeatureGates(featureGate)
+
+	cases := []struct {
+		name      string
+		configure func(config *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration
+		errMsg    string
+	}{
+		{
+			name: "gate enabled, valid 1s",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 1 * time.Second}
+				return conf
+			},
+		},
+		{
+			name: "gate enabled, below minimum 100ms",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 100 * time.Millisecond}
+				return conf
+			},
+			errMsg: "invalid configuration: PodStatusUpdateBatchWindow must be between 250ms and 5s when PodStatusBatchUpdates is enabled",
+		},
+		{
+			name: "gate enabled, above maximum 10s",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 10 * time.Second}
+				return conf
+			},
+			errMsg: "invalid configuration: PodStatusUpdateBatchWindow must be between 250ms and 5s when PodStatusBatchUpdates is enabled",
+		},
+		{
+			name: "gate enabled, at minimum boundary 250ms",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 250 * time.Millisecond}
+				return conf
+			},
+		},
+		{
+			name: "gate enabled, at maximum boundary 5s",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": true, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 5 * time.Second}
+				return conf
+			},
+		},
+		{
+			name: "gate disabled, non-zero window",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": false, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 1 * time.Second}
+				return conf
+			},
+			errMsg: "invalid configuration: PodStatusUpdateBatchWindow must not be set when PodStatusBatchUpdates feature gate is disabled",
+		},
+		{
+			name: "gate disabled, zero window",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"PodStatusBatchUpdates": false, "CustomCPUCFSQuotaPeriod": true}
+				conf.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 0}
+				return conf
+			},
 		},
 	}
 

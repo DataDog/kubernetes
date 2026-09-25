@@ -250,7 +250,7 @@ func (m *ManagerImpl) PluginDisconnected(logger klog.Logger, resourceName string
 
 	if ep, exists := m.endpoints[resourceName]; exists {
 		m.markResourceUnhealthy(logger, resourceName)
-		logger.V(2).Info("Endpoint became unhealthy", "resourceName", resourceName, "endpoint", ep)
+		logger.V(2).Info("Endpoint became unhealthy", "resourceName", resourceName)
 
 		ep.e.setStopTime(time.Now())
 	}
@@ -1120,6 +1120,12 @@ func (m *ManagerImpl) GetAllocatableDevices() ResourceDeviceInstances {
 	resp := m.allDevices.Filter(m.healthyDevices)
 	logger.V(4).Info("GetAllocatableDevices", "known", len(m.allDevices), "allocatable", len(resp))
 	return resp
+}
+
+// AllocatePod is called to trigger the allocation of resources to a pod.
+func (m *ManagerImpl) AllocatePod(pod *v1.Pod) error {
+	// Device Manager does not support pod level resource allocation.
+	return nil
 }
 
 // GetDevices returns the devices used by the specified container

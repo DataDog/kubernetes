@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-	"k8s.io/api/admissionregistration/v1beta1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -140,8 +140,7 @@ func (d *dispatcher) dispatchInvocations(
 	// evaluator to apply patch, also should handle re-invocations
 	for _, invocation := range invocations {
 		// Composition context is now created inside CompositedEvaluator.ForInput,
-		// not here, so that tracing.Start (which wraps ctx below) does not break
-		// the ctx.(CompositionContext) type assertion in mutatingEvaluator.ForInput.
+		// so tracing.Start below cannot hide it behind a wrapped context.
 		if len(invocation.Evaluator.Mutators) != len(invocation.Policy.Spec.Mutations) {
 			// This would be a bug. The compiler should always return exactly as
 			// many evaluators as there are mutations
@@ -216,7 +215,7 @@ func (d *dispatcher) dispatchInvocations(
 			policyReinvokeCtx.RequireReinvokingPreviouslyInvokedPlugins()
 			reinvokeCtx.SetShouldReinvoke()
 		}
-		if invocation.Policy.Spec.ReinvocationPolicy == v1beta1.IfNeededReinvocationPolicy {
+		if invocation.Policy.Spec.ReinvocationPolicy == admissionregistrationv1.IfNeededReinvocationPolicy {
 			policyReinvokeCtx.AddReinvocablePolicyToPreviouslyInvoked(invocationKey)
 		}
 	}

@@ -1723,7 +1723,7 @@ var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Getting the current pod sandbox ID")
-			rs, _, err := getCRIClient()
+			rs, _, err := getCRIClient(ctx)
 			framework.ExpectNoError(err)
 
 			sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
@@ -1905,7 +1905,7 @@ var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
 				restartKubelet := mustStopKubelet(ctx, f)
 
 				ginkgo.By("removing the completed init container statuses from the container runtime")
-				rs, _, err := getCRIClient()
+				rs, _, err := getCRIClient(ctx)
 				framework.ExpectNoError(err)
 
 				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
@@ -2072,7 +2072,7 @@ var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
 				restartKubelet := mustStopKubelet(ctx, f)
 
 				ginkgo.By("removing the completed init container statuses from the container runtime")
-				rs, _, err := getCRIClient()
+				rs, _, err := getCRIClient(ctx)
 				framework.ExpectNoError(err)
 
 				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
@@ -2288,6 +2288,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 								TerminationSeconds: containerTerminationSeconds,
 								ExitCode:           0,
 							}),
+							Lifecycle: &v1.Lifecycle{
+								PostStart: startedPostStartGate(),
+							},
 							RestartPolicy: &containerRestartPolicyAlways,
 						},
 						{
@@ -2306,6 +2309,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 								TerminationSeconds: 1,
 								ExitCode:           0,
 							}),
+							Lifecycle: &v1.Lifecycle{
+								PostStart: startedPostStartGate(),
+							},
 							RestartPolicy: &containerRestartPolicyAlways,
 						},
 					},
@@ -4566,6 +4572,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 							{
 								Name:          restartableInit2,
@@ -4576,6 +4585,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 							{
 								Name:          restartableInit3,
@@ -4586,6 +4598,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 						},
 						Containers: []v1.Container{
@@ -4776,17 +4791,15 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 				restartableInit3 := "restartable-init-3"
 				regular1 := "regular-1"
 
-				makePrestop := func(containerName string) *v1.Lifecycle {
-					return &v1.Lifecycle{
-						PreStop: &v1.LifecycleHandler{
-							Exec: &v1.ExecAction{
-								Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
-									ExitCode:      0,
-									ContainerName: containerName,
-									LoopForever:   true,
-									LoopPeriod:    0.2,
-								}),
-							},
+				makePrestop := func(containerName string) *v1.LifecycleHandler {
+					return &v1.LifecycleHandler{
+						Exec: &v1.ExecAction{
+							Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
+								ExitCode:      0,
+								ContainerName: containerName,
+								LoopForever:   true,
+								LoopPeriod:    0.2,
+							}),
 						},
 					}
 				}
@@ -4807,7 +4820,10 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
-								Lifecycle: makePrestop(restartableInit1),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+									PreStop:   makePrestop(restartableInit1),
+								},
 							},
 							{
 								Name:          restartableInit2,
@@ -4818,7 +4834,10 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
-								Lifecycle: makePrestop(restartableInit2),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+									PreStop:   makePrestop(restartableInit2),
+								},
 							},
 							{
 								Name:          restartableInit3,
@@ -4829,7 +4848,10 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
-								Lifecycle: makePrestop(restartableInit3),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+									PreStop:   makePrestop(restartableInit3),
+								},
 							},
 						},
 						Containers: []v1.Container{
@@ -4915,17 +4937,15 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 				restartableInit3 := "restartable-init-3"
 				regular1 := "regular-1"
 
-				makePrestop := func(containerName string) *v1.Lifecycle {
-					return &v1.Lifecycle{
-						PreStop: &v1.LifecycleHandler{
-							Exec: &v1.ExecAction{
-								Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
-									Delay:         1,
-									ExitCode:      0,
-									ContainerName: containerName,
-									LoopPeriod:    0.2,
-								}),
-							},
+				makePrestop := func(containerName string) *v1.LifecycleHandler {
+					return &v1.LifecycleHandler{
+						Exec: &v1.ExecAction{
+							Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
+								Delay:         1,
+								ExitCode:      0,
+								ContainerName: containerName,
+								LoopPeriod:    0.2,
+							}),
 						},
 					}
 				}
@@ -4946,7 +4966,10 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
-								Lifecycle: makePrestop(restartableInit1),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+									PreStop:   makePrestop(restartableInit1),
+								},
 							},
 							{
 								Name:          restartableInit2,
@@ -4957,7 +4980,10 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
-								Lifecycle: makePrestop(restartableInit2),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+									PreStop:   makePrestop(restartableInit2),
+								},
 							},
 							{
 								Name:          restartableInit3,
@@ -4968,7 +4994,10 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 5,
 									ExitCode:           0,
 								}),
-								Lifecycle: makePrestop(restartableInit3),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+									PreStop:   makePrestop(restartableInit3),
+								},
 							},
 						},
 						Containers: []v1.Container{
@@ -5605,6 +5634,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 1,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 							{
 								Name:          restartableInit2,
@@ -5615,6 +5647,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 20,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 							{
 								Name:          restartableInit3,
@@ -5625,6 +5660,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 1,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 						},
 						Containers: []v1.Container{
@@ -5706,6 +5744,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 1,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 							{
 								Name:          restartableInit2,
@@ -5716,6 +5757,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 20,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 							{
 								Name:          restartableInit3,
@@ -5726,6 +5770,9 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 									TerminationSeconds: 1,
 									ExitCode:           0,
 								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: startedPostStartGate(),
+								},
 							},
 						},
 						Containers: []v1.Container{
@@ -6087,7 +6134,7 @@ var _ = SIGDescribe(framework.WithNodeConformance(), framework.WithSerial(), "Co
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Getting the current pod sandbox ID")
-			rs, _, err := getCRIClient()
+			rs, _, err := getCRIClient(ctx)
 			framework.ExpectNoError(err)
 
 			sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
@@ -6233,7 +6280,7 @@ var _ = SIGDescribe(framework.WithNodeConformance(), framework.WithSerial(), "Co
 				framework.ExpectNoError(err)
 
 				ginkgo.By("Getting the current pod sandbox ID")
-				rs, _, err := getCRIClient()
+				rs, _, err := getCRIClient(ctx)
 				framework.ExpectNoError(err)
 
 				sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{

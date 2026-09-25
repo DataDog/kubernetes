@@ -23,7 +23,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"k8s.io/api/admissionregistration/v1beta1"
+	v1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -77,14 +77,14 @@ func TestVariablesLostThroughTracingSpan(t *testing.T) {
 	// Policy with a variable and a JSONPatch that references it.
 	p := mutations(
 		variables(policy("test-vars-through-tracing"),
-			v1beta1.Variable{
+			v1.Variable{
 				Name:       "replicas",
 				Expression: "object.spec.replicas + 100",
 			},
 		),
-		v1beta1.Mutation{
-			PatchType: v1beta1.PatchTypeJSONPatch,
-			JSONPatch: &v1beta1.JSONPatch{
+		v1.Mutation{
+			PatchType: v1.PatchTypeJSONPatch,
+			JSONPatch: &v1.JSONPatch{
 				Expression: `[
 					JSONPatch{op: "replace", path: "/spec/replicas", value: variables.replicas}
 				]`,
@@ -93,8 +93,8 @@ func TestVariablesLostThroughTracingSpan(t *testing.T) {
 	)
 
 	policyEvaluator := compilePolicy(p)
-	if policyEvaluator.CompositionEnv == nil {
-		t.Fatal("expected CompositionEnv to be set")
+	if policyEvaluator.CompositedCompiler == nil {
+		t.Fatal("expected CompositedCompiler to be set")
 	}
 
 	obj := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{Replicas: ptr.To[int32](1)}}
@@ -124,7 +124,7 @@ func TestVariablesLostThroughTracingSpan(t *testing.T) {
 	// Without tracing: variables should work.
 	t.Run("without_tracing", func(t *testing.T) {
 		baseCtx := context.Background()
-		compositionCtx := policyEvaluator.CompositionEnv.CreateContext(baseCtx)
+		compositionCtx := policyEvaluator.CompositedCompiler.CreateContext(baseCtx)
 
 		result, err := runPatch(t, compositionCtx)
 		if err != nil {
@@ -145,7 +145,7 @@ func TestVariablesLostThroughTracingSpan(t *testing.T) {
 	// assertion in mutatingEvaluator.ForInput succeeds.
 	t.Run("with_tracing", func(t *testing.T) {
 		baseCtx := context.Background()
-		compositionCtx := policyEvaluator.CompositionEnv.CreateContext(baseCtx)
+		compositionCtx := policyEvaluator.CompositedCompiler.CreateContext(baseCtx)
 
 		// Simulate the Datadog tracing patch: wrap the composition context
 		// with tracing.Start, exactly as dispatcher.go does.

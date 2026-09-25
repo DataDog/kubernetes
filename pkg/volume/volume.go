@@ -138,6 +138,7 @@ type MounterArgs struct {
 	// Optional interface that will be used to change the ownership of the volume, if specified.
 	// mainly used by unit tests
 	VolumeOwnershipApplicator VolumeOwnershipChanger
+	ReconstructedVolume       bool
 
 	// IsRemount is true when SetUp is being invoked on a volume that the
 	// reconciler considers already mounted to the pod, e.g. a periodic

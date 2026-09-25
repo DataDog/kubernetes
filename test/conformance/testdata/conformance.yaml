@@ -558,6 +558,42 @@
     MUST cause pods created by that RC to be orphaned.
   release: v1.9
   file: test/e2e/apimachinery/garbage_collector.go
+- testname: MutatingAdmissionPolicy
+  codename: '[sig-api-machinery] MutatingAdmissionPolicy [Privileged:ClusterAdmin]
+    should mutate a Deployment [Conformance]'
+  description: ' The MutatingAdmissionPolicy should mutate a deployment as the expression
+    defined inside the policy.'
+  release: v1.36
+  file: test/e2e/apimachinery/mutatingadmissionpolicy.go
+- testname: MutatingAdmissionPolicy
+  codename: '[sig-api-machinery] MutatingAdmissionPolicy [Privileged:ClusterAdmin]
+    should mutate a Deployment with annotations [Conformance]'
+  description: ' The MutatingAdmissionPolicy should mutate a deployment by adding
+    annotations as defined in the policy.'
+  release: v1.36
+  file: test/e2e/apimachinery/mutatingadmissionpolicy.go
+- testname: MutatingAdmissionPolicy API
+  codename: '[sig-api-machinery] MutatingAdmissionPolicy [Privileged:ClusterAdmin]
+    should support MutatingAdmissionPolicy API operations [Conformance]'
+  description: ' The admissionregistration.k8s.io API group MUST exist in the /apis
+    discovery document. The admissionregistration.k8s.io/v1 API group/version MUST
+    exist in the /apis/admissionregistration.k8s.io discovery document. The mutatingadmissionpolicies
+    resource MUST exist in the /apis/admissionregistration.k8s.io/v1 discovery document.
+    The mutatingadmissionpolicies resource must support create, get, list, watch,
+    update, patch, delete, and deletecollection.'
+  release: v1.36
+  file: test/e2e/apimachinery/mutatingadmissionpolicy.go
+- testname: MutatingAdmissionPolicyBinding API
+  codename: '[sig-api-machinery] MutatingAdmissionPolicy [Privileged:ClusterAdmin]
+    should support MutatingAdmissionPolicyBinding API operations [Conformance]'
+  description: ' The admissionregistration.k8s.io API group MUST exist in the /apis
+    discovery document. The admissionregistration.k8s.io/v1 API group/version MUST
+    exist in the /apis/admissionregistration.k8s.io discovery document. The MutatingAdmissionPolicyBinding
+    resources MUST exist in the /apis/admissionregistration.k8s.io/v1 discovery document.
+    The MutatingAdmissionPolicyBinding resource must support create, get, list, watch,
+    update, patch, delete, and deletecollection.'
+  release: v1.36
+  file: test/e2e/apimachinery/mutatingadmissionpolicy.go
 - testname: Namespace, apply finalizer to a namespace
   codename: '[sig-api-machinery] Namespaces [Serial] should apply a finalizer to a
     Namespace [Conformance]'
@@ -2318,6 +2354,15 @@
     running.
   release: "1.25"
   file: test/e2e/common/node/ephemeral_containers.go
+- testname: Image Volume
+  codename: '[sig-node] ImageVolume should succeed with pod and pull policy of Always
+    [LinuxOnly] [MinimumKubeletVersion:1.35] [Conformance]'
+  description: 'Create a Pod using an image volume and a pull policy of Always. This
+    test verifies that the image volume functionality is available by default and
+    works as intended. [LinuxOnly]: This test is marked as LinuxOnly since Windows
+    does not support image volumes.'
+  release: v1.36
+  file: test/e2e/common/node/image_volume.go
 - testname: init-container-starts-app-restartalways-pod
   codename: '[sig-node] InitContainer [NodeConformance] should invoke init containers
     on a RestartAlways pod [Conformance]'
@@ -2453,35 +2498,6 @@
     patch endpoint to modify CPU requests and limits using equivalent values (e.g.
     2m -> 1m) MUST result in the updated Pod resources displayed correctly in the
     status.
-  release: v1.35
-  file: test/e2e/common/node/pod_resize.go
-- testname: In-place Pod Resize, guaranteed pods with multiple containers, net increase
-  codename: '[sig-node] Pod InPlace Resize Container guaranteed pods with multiple
-    containers 3 containers - increase cpu & mem on c1, c2, decrease cpu & mem on
-    c3 - net increase [MinimumKubeletVersion:1.34] [Conformance]'
-  description: Issuing an in-place Pod Resize request via the Pod Resize subresource
-    patch endpoint to modify CPU and memory requests and limits for a guaranteed pod
-    with 3 containers with a net increase MUST result in the Pod resources being updated
-    as expected.
-  release: v1.35
-  file: test/e2e/common/node/pod_resize.go
-- testname: In-place Pod Resize, guaranteed pods with multiple containers, net decrease
-  codename: '[sig-node] Pod InPlace Resize Container guaranteed pods with multiple
-    containers 3 containers - increase cpu & mem on c1, decrease cpu & mem on c2,
-    c3 - net decrease [MinimumKubeletVersion:1.34] [Conformance]'
-  description: Issuing an in-place Pod Resize request via the Pod Resize subresource
-    patch endpoint to modify CPU and memory requests and limits for a pod with 3 containers
-    with a net decrease MUST result in the Pod resources being updated as expected.
-  release: v1.35
-  file: test/e2e/common/node/pod_resize.go
-- testname: In-place Pod Resize, guaranteed pods with multiple containers, various
-    operations
-  codename: '[sig-node] Pod InPlace Resize Container guaranteed pods with multiple
-    containers 3 containers - increase: CPU (c1,c3), memory (c2, c3) ; decrease: CPU
-    (c2) [MinimumKubeletVersion:1.34] [Conformance]'
-  description: Issuing an in-place Pod Resize request via the Pod Resize subresource
-    patch endpoint to modify CPU and memory requests and limits for a pod with 3 containers
-    with various operations MUST result in the Pod resources being updated as expected.
   release: v1.35
   file: test/e2e/common/node/pod_resize.go
 - testname: In-place Pod Resize, read and replace endpoints

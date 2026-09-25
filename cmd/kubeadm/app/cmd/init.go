@@ -599,7 +599,7 @@ func (d *initData) Client() (clientset.Interface, error) {
 
 // Tokens returns an array of token strings.
 func (d *initData) Tokens() []string {
-	tokens := []string{}
+	tokens := make([]string, 0, len(d.cfg.BootstrapTokens))
 	for _, bt := range d.cfg.BootstrapTokens {
 		tokens = append(tokens, bt.Token.String())
 	}

@@ -17,6 +17,7 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,6 +49,6 @@ func TestAmbientCapabilitiesKubeletGateDisabled(t *testing.T) {
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.AmbientCapabilities, false)
 	m := &kubeGenericRuntimeManager{}
 	container := &v1.Container{Name: "ambient", SecurityContext: &v1.SecurityContext{Capabilities: &v1.Capabilities{Ambient: []v1.Capability{"NET_BIND_SERVICE"}}}}
-	_, err := m.determineEffectiveSecurityContext(&v1.Pod{}, container, nil, "")
+	_, err := m.determineEffectiveSecurityContext(context.Background(), &v1.Pod{}, container, nil, "")
 	require.ErrorContains(t, err, "AmbientCapabilities feature gate is disabled")
 }
