@@ -20007,6 +20007,26 @@ func schema_k8sio_api_core_v1_Capabilities(ref common.ReferenceCallback) common.
 							},
 						},
 					},
+					"ambient": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ambient capabilities to add to the ambient, inheritable, permitted, effective and bounding sets. Uses the same capability names and add/drop semantics as Add: ALL selects all capabilities, Drop ALL resets defaults before individual additions, and individual drops take precedence. Requires the AmbientCapabilities feature gate and a supporting runtime.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -72882,6 +72902,12 @@ func schema_k8sio_kubelet_config_v1beta1_KubeletConfiguration(ref common.Referen
 							Description: "CrashLoopBackOff contains config to modify node-level parameters for container restart behavior",
 							Default:     map[string]interface{}{},
 							Ref:         ref(kubeletconfigv1beta1.CrashLoopBackOffConfig{}.OpenAPIModelName()),
+						},
+					},
+					"podStatusUpdateBatchWindow": {
+						SchemaProps: spec.SchemaProps{
+							Description: "podStatusUpdateBatchWindow is the duration to wait before flushing a pod's status update to the API server, allowing multiple container state changes to be coalesced into a single update. When the PodStatusBatchUpdates feature gate is enabled this must be between 250ms and 5s (defaults to 1s if unset); when the gate is disabled this must be zero.",
+							Ref:         ref(metav1.Duration{}.OpenAPIModelName()),
 						},
 					},
 					"reservedMemory": {
