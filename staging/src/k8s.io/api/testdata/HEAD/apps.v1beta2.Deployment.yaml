@@ -378,6 +378,8 @@ spec:
           capabilities:
             add:
             - addValue
+            ambient:
+            - ambientValue
             drop:
             - dropValue
           privileged: true
@@ -616,6 +618,8 @@ spec:
           capabilities:
             add:
             - addValue
+            ambient:
+            - ambientValue
             drop:
             - dropValue
           privileged: true
@@ -860,6 +864,8 @@ spec:
           capabilities:
             add:
             - addValue
+            ambient:
+            - ambientValue
             drop:
             - dropValue
           privileged: true
