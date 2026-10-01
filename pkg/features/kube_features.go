@@ -64,6 +64,12 @@ const (
 	// deprecated feature.
 	AllowServiceExternalIPs featuregate.Feature = "AllowServiceExternalIPs"
 
+	// owner: @JulesDT
+	// kep: https://kep.k8s.io/2763
+	//
+	// Datadog experiment: explicitly request ambient capabilities.
+	AmbientCapabilities featuregate.Feature = "AmbientCapabilities"
+
 	// owner: @bswartz
 	//
 	// Enables usage of any object for volume data source in PVCs
@@ -1264,6 +1270,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.0"), Default: true, PreRelease: featuregate.GA},
 	},
 
+	AmbientCapabilities: {
+		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	AnyVolumeDataSource: {
 		{Version: version.MustParse("1.18"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.24"), Default: true, PreRelease: featuregate.Beta},
@@ -2401,6 +2411,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	AllowOverwriteTerminationGracePeriodSeconds: {},
 
 	AllowServiceExternalIPs: {},
+
+	AmbientCapabilities: {},
 
 	AnyVolumeDataSource: {},
 
