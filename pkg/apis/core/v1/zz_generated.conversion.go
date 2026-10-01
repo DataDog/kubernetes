@@ -2819,6 +2819,7 @@ func Convert_core_CSIVolumeSource_To_v1_CSIVolumeSource(in *core.CSIVolumeSource
 func autoConvert_v1_Capabilities_To_core_Capabilities(in *corev1.Capabilities, out *core.Capabilities, s conversion.Scope) error {
 	out.Add = *(*[]core.Capability)(unsafe.Pointer(&in.Add))
 	out.Drop = *(*[]core.Capability)(unsafe.Pointer(&in.Drop))
+	out.Ambient = *(*[]core.Capability)(unsafe.Pointer(&in.Ambient))
 	return nil
 }
 
@@ -2830,6 +2831,7 @@ func Convert_v1_Capabilities_To_core_Capabilities(in *corev1.Capabilities, out *
 func autoConvert_core_Capabilities_To_v1_Capabilities(in *core.Capabilities, out *corev1.Capabilities, s conversion.Scope) error {
 	out.Add = *(*[]corev1.Capability)(unsafe.Pointer(&in.Add))
 	out.Drop = *(*[]corev1.Capability)(unsafe.Pointer(&in.Drop))
+	out.Ambient = *(*[]corev1.Capability)(unsafe.Pointer(&in.Ambient))
 	return nil
 }
 
