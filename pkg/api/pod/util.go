@@ -729,6 +729,15 @@ func dropDisabledFields(
 		podSpec = &api.PodSpec{}
 	}
 
+	if !utilfeature.DefaultFeatureGate.Enabled(features.AmbientCapabilities) && !ambientCapabilitiesInUse(oldPodSpec) {
+		VisitContainers(podSpec, AllContainers, func(c *api.Container, _ ContainerType) bool {
+			if c.SecurityContext != nil && c.SecurityContext.Capabilities != nil {
+				c.SecurityContext.Capabilities.Ambient = nil
+			}
+			return true
+		})
+	}
+
 	// If the feature is disabled and not in use, drop the hostUsers field.
 	if !utilfeature.DefaultFeatureGate.Enabled(features.UserNamespacesSupport) && !hostUsersInUse(oldPodSpec) {
 		// Drop the field in podSpec only if SecurityContext is not nil.
@@ -1383,6 +1392,21 @@ func nodeTaintsPolicyInUse(podSpec *api.PodSpec) bool {
 // hostUsersInUse returns true if the pod spec has spec.hostUsers field set.
 func hostUsersInUse(podSpec *api.PodSpec) bool {
 	return podSpec != nil && podSpec.SecurityContext != nil && podSpec.SecurityContext.HostUsers != nil
+}
+
+func ambientCapabilitiesInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	inUse := false
+	VisitContainers(podSpec, AllContainers, func(c *api.Container, _ ContainerType) bool {
+		if c.SecurityContext != nil && c.SecurityContext.Capabilities != nil && len(c.SecurityContext.Capabilities.Ambient) > 0 {
+			inUse = true
+			return false
+		}
+		return true
+	})
+	return inUse
 }
 
 func supplementalGroupsPolicyInUse(podSpec *api.PodSpec) bool {
