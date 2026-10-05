@@ -39,6 +39,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/health" // registers the client-side health checking function
 	"k8s.io/klog/v2"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -69,6 +70,13 @@ const (
 	dialTimeout = 20 * time.Second
 
 	dbMetricsMonitorJitter = 0.5
+
+	// healthCheckedRoundRobinServiceConfig replaces the round_robin service config
+	// set by the etcd client resolver, which has no healthCheckConfig. It makes
+	// grpc watch the etcd gRPC health service, so members reporting NOT_SERVING
+	// (e.g. while being defragmented with --experimental-stop-grpc-service-on-defrag)
+	// are skipped. etcd sets the serving status of the empty service name.
+	healthCheckedRoundRobinServiceConfig = `{"loadBalancingPolicy":"round_robin","healthCheckConfig":{"serviceName":""}}`
 )
 
 // TODO(negz): Stop using a package scoped logger. At the time of writing we're
@@ -344,6 +352,10 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 		}
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
 	}
+	dialOptions = append(dialOptions,
+		grpc.WithDisableServiceConfig(),
+		grpc.WithDefaultServiceConfig(healthCheckedRoundRobinServiceConfig),
+	)
 
 	cfg := clientv3.Config{
 		DialTimeout:          dialTimeout,
