@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/health" // registers the client-side health checking function
 	"k8s.io/klog/v2"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -69,7 +71,23 @@ const (
 	dialTimeout = 20 * time.Second
 
 	dbMetricsMonitorJitter = 0.5
+
+	// etcdClientGRPCHealthCheckEnv opts into gRPC client-side health checking, so
+	// that members reporting NOT_SERVING on the gRPC health service are skipped,
+	// e.g. while being defragmented with --experimental-stop-grpc-service-on-defrag.
+	// It only helps when --etcd-servers lists more than one member.
+	etcdClientGRPCHealthCheckEnv = "DD_ETCD_CLIENT_GRPC_HEALTH_CHECK"
+
+	// healthCheckedRoundRobinServiceConfig replaces the round_robin service config
+	// set by the etcd client resolver, which has no healthCheckConfig. etcd sets
+	// the serving status of the empty service name.
+	healthCheckedRoundRobinServiceConfig = `{"loadBalancingPolicy":"round_robin","healthCheckConfig":{"serviceName":""}}`
 )
+
+func etcdClientGRPCHealthCheckEnabled() bool {
+	enabled, _ := strconv.ParseBool(os.Getenv(etcdClientGRPCHealthCheckEnv))
+	return enabled
+}
 
 // TODO(negz): Stop using a package scoped logger. At the time of writing we're
 // creating an etcd client for each CRD. We need to pass each etcd client a
@@ -343,6 +361,12 @@ var newETCD3Client = func(c storagebackend.TransportConfig) (*kubernetes.Client,
 			return egressDialer(ctx, "tcp", addr)
 		}
 		dialOptions = append(dialOptions, grpc.WithContextDialer(dialer))
+	}
+	if etcdClientGRPCHealthCheckEnabled() {
+		dialOptions = append(dialOptions,
+			grpc.WithDisableServiceConfig(),
+			grpc.WithDefaultServiceConfig(healthCheckedRoundRobinServiceConfig),
+		)
 	}
 
 	cfg := clientv3.Config{
