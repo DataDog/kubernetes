@@ -25,8 +25,8 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-// Ambient capabilities follow the existing Add field's name-validation rules.
-// Runtime-specific names and ALL/add/drop resolution belong to the runtime.
+// Apart from the prohibited ambient grants, name validation follows Add.
+// Unknown names are left to the runtime.
 func TestValidateAmbientCapabilities(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -53,35 +53,50 @@ func TestValidateAmbientCapabilities(t *testing.T) {
 	}
 }
 
-func TestValidateAmbientCapabilitiesPrivilegeEscalation(t *testing.T) {
+func TestValidateAmbientCapabilitiesRestrictions(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		ambient, drop  []core.Capability
-		grantsSysAdmin bool
+		name          string
+		ambient, drop []core.Capability
+		forbidden     []string
 	}{
-		{"explicit", []core.Capability{"SYS_ADMIN"}, nil, true},
-		{"lowercase", []core.Capability{"sys_admin"}, nil, true},
-		{"all", []core.Capability{"ALL"}, nil, true},
-		{"lowercase all", []core.Capability{"all"}, nil, true},
-		{"individual drop", []core.Capability{"SYS_ADMIN"}, []core.Capability{"SYS_ADMIN"}, false},
-		{"all minus sys admin", []core.Capability{"ALL"}, []core.Capability{"sys_admin"}, false},
-		{"all reset", []core.Capability{"ALL"}, []core.Capability{"all"}, false},
-		{"explicit after reset", []core.Capability{"ALL", "SYS_ADMIN"}, []core.Capability{"ALL"}, true},
-		{"explicit dropped after reset", []core.Capability{"ALL", "SYS_ADMIN"}, []core.Capability{"ALL", "SYS_ADMIN"}, false},
-		{"unrelated capability", []core.Capability{"NET_BIND_SERVICE"}, []core.Capability{"ALL"}, false},
-		{"unknown prefixed name", []core.Capability{"CAP_SYS_ADMIN"}, nil, false},
+		{"sys admin", []core.Capability{"SYS_ADMIN"}, nil, []string{"SYS_ADMIN"}},
+		{"dac override", []core.Capability{"DAC_OVERRIDE"}, nil, []string{"DAC_OVERRIDE"}},
+		{"lowercase sys admin", []core.Capability{"sys_admin"}, nil, []string{"SYS_ADMIN"}},
+		{"lowercase dac override", []core.Capability{"dac_override"}, nil, []string{"DAC_OVERRIDE"}},
+		{"both", []core.Capability{"SYS_ADMIN", "DAC_OVERRIDE"}, nil, []string{"SYS_ADMIN", "DAC_OVERRIDE"}},
+		{"all", []core.Capability{"ALL"}, nil, []string{"SYS_ADMIN", "DAC_OVERRIDE"}},
+		{"lowercase all", []core.Capability{"all"}, nil, []string{"SYS_ADMIN", "DAC_OVERRIDE"}},
+		{"drop sys admin", []core.Capability{"SYS_ADMIN"}, []core.Capability{"sys_admin"}, nil},
+		{"drop dac override", []core.Capability{"DAC_OVERRIDE"}, []core.Capability{"dac_override"}, nil},
+		{"all minus sys admin", []core.Capability{"ALL"}, []core.Capability{"SYS_ADMIN"}, []string{"DAC_OVERRIDE"}},
+		{"all minus dac override", []core.Capability{"ALL"}, []core.Capability{"DAC_OVERRIDE"}, []string{"SYS_ADMIN"}},
+		{"all minus both", []core.Capability{"ALL"}, []core.Capability{"sys_admin", "dac_override"}, nil},
+		{"all reset", []core.Capability{"ALL"}, []core.Capability{"all"}, nil},
+		{"explicit after reset", []core.Capability{"ALL", "SYS_ADMIN", "DAC_OVERRIDE"}, []core.Capability{"ALL"}, []string{"SYS_ADMIN", "DAC_OVERRIDE"}},
+		{"explicit dropped after reset", []core.Capability{"ALL", "SYS_ADMIN", "DAC_OVERRIDE"}, []core.Capability{"ALL", "SYS_ADMIN", "DAC_OVERRIDE"}, nil},
+		{"unrelated capability", []core.Capability{"NET_BIND_SERVICE"}, []core.Capability{"ALL"}, nil},
+		{"empty", nil, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, allowEscalation := range []*bool{nil, ptr.To(true), ptr.To(false)} {
 				sc := &core.SecurityContext{Capabilities: &core.Capabilities{Ambient: tc.ambient, Drop: tc.drop}, AllowPrivilegeEscalation: allowEscalation}
 				errs := ValidateSecurityContext(sc, field.NewPath("securityContext"), true)
-				if allowEscalation != nil && !*allowEscalation && tc.grantsSysAdmin {
-					require.Len(t, errs, 1)
-					require.Equal(t, "securityContext.capabilities.ambient", errs[0].Field)
-				} else {
-					require.Empty(t, errs)
+				require.Len(t, errs, len(tc.forbidden))
+				for i, capability := range tc.forbidden {
+					require.Equal(t, "securityContext.capabilities.ambient", errs[i].Field)
+					require.Contains(t, errs[i].Detail, capability)
 				}
 			}
 		})
+	}
+}
+
+func TestAmbientRestrictionsPreserveOrdinaryCapabilities(t *testing.T) {
+	for _, allowEscalation := range []*bool{nil, ptr.To(true), ptr.To(false)} {
+		sc := &core.SecurityContext{
+			Capabilities:             &core.Capabilities{Add: []core.Capability{"SYS_ADMIN", "DAC_OVERRIDE"}},
+			AllowPrivilegeEscalation: allowEscalation,
+		}
+		require.Empty(t, ValidateSecurityContext(sc, field.NewPath("securityContext"), true))
 	}
 }
