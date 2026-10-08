@@ -8533,8 +8533,13 @@ func ValidateSecurityContext(sc *core.SecurityContext, fldPath *field.Path, host
 					allErrs = append(allErrs, field.Invalid(fldPath, sc, "cannot set `allowPrivilegeEscalation` to false and `capabilities.Add` CAP_SYS_ADMIN"))
 				}
 			}
-			if hasAmbientCapability(sc.Capabilities, "SYS_ADMIN") {
-				allErrs = append(allErrs, field.Invalid(fldPath.Child("capabilities", "ambient"), sc.Capabilities.Ambient, "cannot grant SYS_ADMIN with allowPrivilegeEscalation set to false"))
+		}
+	}
+
+	if sc.Capabilities != nil {
+		for _, capability := range []core.Capability{"SYS_ADMIN", "DAC_OVERRIDE"} {
+			if hasAmbientCapability(sc.Capabilities, capability) {
+				allErrs = append(allErrs, field.Invalid(fldPath.Child("capabilities", "ambient"), sc.Capabilities.Ambient, fmt.Sprintf("cannot grant %s as an ambient capability", capability)))
 			}
 		}
 	}
