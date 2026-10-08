@@ -8463,11 +8463,9 @@ func validateEndpointPort(port *core.EndpointPort, requireName bool, fldPath *fi
 	return allErrs
 }
 
-// hasAmbientCapability checks effective ambient grants for allowPrivilegeEscalation
-// validation. Match the runtime's unprefixed, case-insensitive names and ALL handling;
-// a literal CAP_SYS_ADMIN comparison would miss SYS_ADMIN, sys_admin, and ALL.
-// Drop ALL clears wildcard additions, while explicit additions survive that reset.
-// Individual drops take precedence over additions.
+// hasAmbientCapability reports whether the requested ambient set grants capability.
+// Names are case-insensitive. Drop ALL clears wildcard additions but preserves
+// explicit additions; individual drops take precedence over both.
 func hasAmbientCapability(caps *core.Capabilities, capability core.Capability) bool {
 	var explicit, all bool
 	for _, c := range caps.Ambient {
