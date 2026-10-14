@@ -1,0 +1,11 @@
+include: https://gitlab-templates.ddbuild.io/compute-delivery/v2/compute-delivery.yml
+
+build-docker-image:
+  before_script:
+    - git remote add upstream https://github.com/kubernetes/kubernetes 
+    - git fetch upstream
+  extends: .build-docker-image
+
+build-nydus-image:
+  needs: ["build-docker-image"]
+  extends: .build-nydus-image
