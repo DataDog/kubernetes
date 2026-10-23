@@ -359,6 +359,8 @@ template:
         capabilities:
           add:
           - addValue
+          ambient:
+          - ambientValue
           drop:
           - dropValue
         privileged: true
@@ -597,6 +599,8 @@ template:
         capabilities:
           add:
           - addValue
+          ambient:
+          - ambientValue
           drop:
           - dropValue
         privileged: true
@@ -841,6 +845,8 @@ template:
         capabilities:
           add:
           - addValue
+          ambient:
+          - ambientValue
           drop:
           - dropValue
         privileged: true
