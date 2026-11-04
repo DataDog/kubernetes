@@ -46,6 +46,7 @@ import (
 	kubeutil "k8s.io/kubernetes/pkg/kubelet/util"
 	statusutil "k8s.io/kubernetes/pkg/util/pod"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
+	"k8s.io/utils/clock"
 )
 
 // A wrapper around v1.PodStatus that includes a version to enforce that stale pod statuses are
@@ -82,6 +83,13 @@ type manager struct {
 
 	podStartupLatencyHelper PodStartupLatencyStateHelper
 	notifiers               []PodUpdateNotifier
+
+	// batcher debounces pod status updates within a time window. Nil unless
+	// EnableBatching has been called with a positive window. Written only by
+	// EnableBatching (guarded by enableBatchingOnce); read on the hot path
+	// under podStatusesLock, so EnableBatching must run before any sync goroutines.
+	batcher            *statusBatcher
+	enableBatchingOnce sync.Once
 }
 
 type podResizeConditions struct {
@@ -142,6 +150,8 @@ type podStatusNotification struct {
 	status        v1.PodStatus
 	isAdded       bool
 	podIsFinished bool
+	batchDelay    time.Duration
+	batchFlushed  bool
 }
 
 // Manager is the Source of truth for kubelet pod status, and should be kept up-to-date with
@@ -210,6 +220,10 @@ type Manager interface {
 	// BackfillPodResizeConditions backfills the status manager's resize conditions by reading them from the
 	// provided pods' statuses.
 	BackfillPodResizeConditions(pods []*v1.Pod)
+
+	// EnableBatching turns on debounced pod status updates with the given window.
+	// A non-positive batchWindow is a no-op (batching stays disabled).
+	EnableBatching(clk clock.WithDelayedExecution, batchWindow time.Duration)
 }
 
 const syncPeriod = 10 * time.Second
@@ -225,6 +239,30 @@ func NewManager(kubeClient clientset.Interface, podManager PodManager, podDeleti
 		apiStatusVersions:       make(map[kubetypes.MirrorPodUID]uint64),
 		podDeletionSafety:       podDeletionSafety,
 		podStartupLatencyHelper: podStartupLatencyHelper,
+	}
+}
+
+// EnableBatching turns on debounced pod status updates with the given window.
+// Must be called before Start, and may only take effect once per manager; a
+// second call is silently ignored to preserve any in-flight timers. A
+// non-positive batchWindow leaves batching disabled and logs a warning so a
+// misconfiguration is not invisible.
+func (m *manager) EnableBatching(clk clock.WithDelayedExecution, batchWindow time.Duration) {
+	m.enableBatchingOnce.Do(func() {
+		if batchWindow <= 0 {
+			klog.InfoS("PodStatusBatchUpdates: EnableBatching called with non-positive window; batching stays disabled", "batchWindow", batchWindow)
+			return
+		}
+		m.batcher = newStatusBatcher(clk, batchWindow, m.signalUpdate)
+	})
+}
+
+// signalUpdate performs a non-blocking send on podStatusChannel. The channel
+// has capacity 1, so a pending notification absorbs additional signals.
+func (m *manager) signalUpdate() {
+	select {
+	case m.podStatusChannel <- struct{}{}:
+	default:
 	}
 }
 
@@ -1083,10 +1121,17 @@ func (m *manager) updateStatusInternal(logger klog.Logger, pod *v1.Pod, status v
 
 	m.podStatuses[pod.UID] = newStatus
 
-	select {
-	case m.podStatusChannel <- struct{}{}:
-	default:
-		// there's already a status update pending
+	var batchDelay time.Duration
+	var batchFlushed bool
+	if m.batcher == nil || shouldBypass(forceUpdate, &oldStatus, &status) {
+		if m.batcher != nil {
+			m.batcher.Cancel(pod.UID)
+			reason := bypassReason(forceUpdate, &oldStatus, &status)
+			metrics.PodStatusBatchBypass.WithLabelValues(reason).Inc()
+		}
+		m.signalUpdate()
+	} else {
+		batchDelay, batchFlushed = m.batcher.Schedule(pod.UID)
 	}
 
 	podCopy := *pod
@@ -1097,12 +1142,17 @@ func (m *manager) updateStatusInternal(logger klog.Logger, pod *v1.Pod, status v
 		status:        status,
 		isAdded:       !isCached && pod.DeletionTimestamp == nil,
 		podIsFinished: podIsFinished,
+		batchDelay:    batchDelay,
+		batchFlushed:  batchFlushed,
 	}
 
 	return true, notification
 }
 
 func (m *manager) sendNotification(logger klog.Logger, n *podStatusNotification) {
+	if n.batchFlushed {
+		metrics.PodStatusBatchDelay.Observe(n.batchDelay.Seconds())
+	}
 	for _, notifier := range m.notifiers {
 		if !n.podIsFinished {
 			notifier.OnPodUpdated(logger, n.pod, n.status, n.isAdded)
@@ -1127,11 +1177,19 @@ func updateLastTransitionTime(status, oldStatus *v1.PodStatus, conditionType v1.
 	condition.LastTransitionTime = lastTransitionTime
 }
 
-// deletePodStatus simply removes the given pod from the status cache.
+// deletePodStatus simply removes the given pod from the status cache. Any
+// pending batched update for uid is discarded; that is the intent for pod
+// removal, but a V(4) log lets operators correlate "missing status" reports
+// with discarded pending writes.
 func (m *manager) deletePodStatus(uid types.UID) {
 	m.podStatusesLock.Lock()
 	defer m.podStatusesLock.Unlock()
 	delete(m.podStatuses, uid)
+	if m.batcher != nil {
+		if m.batcher.Cancel(uid) {
+			klog.V(5).InfoS("Discarded pending batched status update on pod removal", "podUID", uid)
+		}
+	}
 	m.podStartupLatencyHelper.DeletePodStartupState(uid)
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		if conds, exists := m.podResizeConditions[uid]; exists {
@@ -1151,6 +1209,11 @@ func (m *manager) RemoveOrphanedStatuses(logger klog.Logger, podUIDs map[types.U
 		if _, ok := podUIDs[key]; !ok {
 			logger.V(5).Info("Removing pod from status map", "podUID", key)
 			delete(m.podStatuses, key)
+			if m.batcher != nil {
+				if m.batcher.Cancel(key) {
+					logger.V(4).Info("Discarded pending batched status update on orphan cleanup", "podUID", key)
+				}
+			}
 			if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 				if conds, exists := m.podResizeConditions[key]; exists {
 					m.observeDeferredResizeDuration(key, conds.PodResizePending, metrics.DeferredResizeResolutionTerminated)

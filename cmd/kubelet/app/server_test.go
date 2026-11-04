@@ -23,6 +23,8 @@ import (
 	"crypto/mldsa"
 	"crypto/rsa"
 	"fmt"
+	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -35,10 +37,126 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	certutil "k8s.io/client-go/util/cert"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	logsapi "k8s.io/component-base/logs/api/v1"
+	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/ktesting"
+	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 	"k8s.io/kubernetes/cmd/kubelet/app/options"
+	"k8s.io/kubernetes/pkg/features"
 	kubeletconfiginternal "k8s.io/kubernetes/pkg/kubelet/apis/config"
+	sigsyaml "sigs.k8s.io/yaml"
 )
+
+func TestNewKubeletCommandPodStatusBatchWindow(t *testing.T) {
+	tests := []struct {
+		name           string
+		enabled        bool
+		config         string
+		wantWindow     time.Duration
+		wantBatchError string
+	}{
+		{
+			name:       "flags only enablement",
+			enabled:    true,
+			wantWindow: time.Second,
+		},
+		{
+			name:       "CLI enables gate disabled in config",
+			enabled:    true,
+			config:     "featureGates:\n  PodStatusBatchUpdates: false\n",
+			wantWindow: time.Second,
+		},
+		{
+			name:       "explicit window is preserved on CLI enablement",
+			enabled:    true,
+			config:     "featureGates:\n  PodStatusBatchUpdates: false\npodStatusUpdateBatchWindow: 2s\n",
+			wantWindow: 2 * time.Second,
+		},
+		{
+			name:           "invalid explicit window is rejected on CLI enablement",
+			enabled:        true,
+			config:         "featureGates:\n  PodStatusBatchUpdates: false\npodStatusUpdateBatchWindow: 100ms\n",
+			wantWindow:     100 * time.Millisecond,
+			wantBatchError: "PodStatusUpdateBatchWindow must be between 250ms and 5s",
+		},
+		{
+			name: "disabled gate keeps zero window",
+		},
+		{
+			name:           "disabled gate rejects explicit window",
+			config:         "featureGates:\n  PodStatusBatchUpdates: false\npodStatusUpdateBatchWindow: 1s\n",
+			wantWindow:     time.Second,
+			wantBatchError: "PodStatusUpdateBatchWindow must not be set",
+		},
+		{
+			name:           "CLI disabled gate still rejects a nonzero defaulted window",
+			config:         "featureGates:\n  PodStatusBatchUpdates: true\n",
+			wantWindow:     time.Second,
+			wantBatchError: "PodStatusUpdateBatchWindow must not be set",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.PodStatusBatchUpdates, false)
+			logState := klog.CaptureState()
+			logWriter, logFlags := log.Writer(), log.Flags()
+			slogLogger := slog.Default()
+			t.Cleanup(func() {
+				if err := logsapi.ResetForTest(utilfeature.DefaultFeatureGate); err != nil {
+					t.Errorf("reset logging configuration: %v", err)
+				}
+				logState.Restore()
+				slog.SetDefault(slogLogger)
+				log.SetOutput(logWriter)
+				log.SetFlags(logFlags)
+			})
+
+			logger := ktesting.NewLogger(t, ktesting.NewConfig(ktesting.BufferLogs(true)))
+			klog.SetLoggerWithOptions(logger, klog.ContextualLogger(true))
+			cmd := NewKubeletCommand(klog.NewContext(t.Context(), logger))
+			// Fail validation so the command never constructs runtime dependencies or starts kubelet.
+			args := []string{"--max-pods=-1", fmt.Sprintf("--feature-gates=PodStatusBatchUpdates=%t", tt.enabled)}
+			if tt.config != "" {
+				configPath := filepath.Join(t.TempDir(), "kubelet.yaml")
+				config := "apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\n" + tt.config
+				require.NoError(t, os.WriteFile(configPath, []byte(config), 0600))
+				args = append(args, "--config="+configPath)
+			}
+
+			err := cmd.RunE(cmd, args)
+			require.ErrorContains(t, err, "maxPods (--max-pods) -1 must not be a negative number")
+			if tt.wantBatchError == "" {
+				require.NotContains(t, err.Error(), "invalid configuration: PodStatusUpdateBatchWindow")
+			} else {
+				require.ErrorContains(t, err, tt.wantBatchError)
+			}
+
+			var effectiveConfig *kubeletconfigv1beta1.KubeletConfiguration
+			for _, entry := range logger.GetSink().(ktesting.Underlier).GetBuffer().Data() {
+				if entry.Message != "Effective KubeletConfiguration" {
+					continue
+				}
+				require.Len(t, entry.ParameterKVList, 2)
+				require.Equal(t, "config", entry.ParameterKVList[0])
+				configYAML, ok := entry.ParameterKVList[1].(string)
+				require.True(t, ok, "effective configuration log must contain YAML")
+				effectiveConfig = &kubeletconfigv1beta1.KubeletConfiguration{}
+				require.NoError(t, sigsyaml.Unmarshal([]byte(configYAML), effectiveConfig))
+				break
+			}
+			require.NotNil(t, effectiveConfig, "command must log the effective configuration before validation")
+			require.Equal(t, tt.wantWindow, effectiveConfig.PodStatusUpdateBatchWindow.Duration)
+			if tt.config == "" {
+				require.Equal(t, int32(10255), effectiveConfig.ReadOnlyPort)
+				require.Equal(t, kubeletconfigv1beta1.KubeletAuthorizationModeAlwaysAllow, effectiveConfig.Authorization.Mode)
+			}
+		})
+	}
+}
 
 func TestValueOfAllocatableResources(t *testing.T) {
 	testCases := []struct {

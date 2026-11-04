@@ -20,6 +20,7 @@ import (
 	"os"
 	"testing"
 
+	basemetrics "k8s.io/component-base/metrics"
 	"k8s.io/component-base/metrics/testutil"
 )
 
@@ -70,6 +71,51 @@ func TestImagePullDurationMetric(t *testing.T) {
 		}
 
 	})
+}
+
+func TestPodStatusBatchDelayBuckets(t *testing.T) {
+	registry := basemetrics.NewKubeRegistry()
+	registry.MustRegister(PodStatusBatchDelay)
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(families) != 1 {
+		t.Fatalf("expected one metric family, got %d", len(families))
+	}
+	if name := families[0].GetName(); name != "kubelet_"+PodStatusBatchDelayKey {
+		t.Fatalf("unexpected metric name %q", name)
+	}
+	if count := len(families[0].GetMetric()); count != 1 {
+		t.Fatalf("expected one histogram, got %d metrics", count)
+	}
+	histogram := families[0].GetMetric()[0].GetHistogram()
+	if histogram == nil {
+		t.Fatal("expected a histogram metric")
+	}
+
+	for _, tt := range []struct {
+		name           string
+		delay          float64
+		wantUpperBound float64
+	}{
+		{name: "default window with jitter", delay: 1.2, wantUpperBound: 1.25},
+		{name: "maximum window with jitter", delay: 6, wantUpperBound: 6},
+		{name: "coalescing at maximum window", delay: 21, wantUpperBound: 25},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, bucket := range histogram.GetBucket() {
+				if upperBound := bucket.GetUpperBound(); upperBound >= tt.delay {
+					if upperBound != tt.wantUpperBound {
+						t.Errorf("bucket covering %gs has upper bound %g, want %g", tt.delay, upperBound, tt.wantUpperBound)
+					}
+					return
+				}
+			}
+			t.Errorf("no finite histogram bucket covers %gs", tt.delay)
+		})
+	}
 }
 
 func clearMetrics() {
