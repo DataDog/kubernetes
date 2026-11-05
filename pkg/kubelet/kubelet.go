@@ -737,6 +737,9 @@ func NewMainKubelet(ctx context.Context,
 	klet.podManager = kubepod.NewBasicPodManager()
 
 	klet.statusManager = status.NewManager(klet.kubeClient, klet.podManager, klet, kubeDeps.PodStartupLatencyTracker)
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+		klet.statusManager.EnableBatching(clock.RealClock{}, kubeCfg.PodStatusUpdateBatchWindow.Duration)
+	}
 
 	broadcaster := pods.NewBroadcaster(ctx)
 	klet.podsServer = pods.NewPodsServer(broadcaster, klet.podManager, klet.statusManager, klet.sourcesReady)

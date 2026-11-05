@@ -313,6 +313,12 @@ func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfigura
 		}
 	}
 
+	if localFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+		if obj.PodStatusUpdateBatchWindow == zeroDuration {
+			obj.PodStatusUpdateBatchWindow = metav1.Duration{Duration: 1 * time.Second}
+		}
+	}
+
 	if obj.ClientCertificateKeyAlgorithm == nil {
 		obj.ClientCertificateKeyAlgorithm = ptr.To(kubeletconfigv1beta1.CertificateKeyAlgorithmDefault)
 	}

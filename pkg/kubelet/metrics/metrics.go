@@ -203,6 +203,11 @@ const (
 	PodDeferredAcceptedResizesKey       = "pod_deferred_accepted_resizes_total"
 	PodDeferredResizeDurationSecondsKey = "pod_deferred_resize_duration_seconds"
 
+	// Metric keys for pod status batching.
+	PodStatusBatchCoalescedKey = "pod_status_batch_coalesced_total"
+	PodStatusBatchDelayKey     = "pod_status_batch_delay_seconds"
+	PodStatusBatchBypassKey    = "pod_status_batch_bypass_total"
+
 	// Metric key for podcertificate states.
 	PodCertificateStatesKey = "podcertificate_states"
 
@@ -1329,6 +1334,35 @@ var (
 		[]string{"resolution", "priority_bucket"},
 	)
 
+	PodStatusBatchCoalesced = metrics.NewCounter(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchCoalescedKey,
+			Help:           "Number of pod status updates that reset an already-pending debounce timer. Does not count API writes avoided.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchDelay = metrics.NewHistogram(
+		&metrics.HistogramOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchDelayKey,
+			Help:           "Elapsed time in seconds from the first pending status change until a debounce timer or the age guard attempts to notify the status sync loop. Excludes explicit flushes and cancellations; does not measure API propagation latency.",
+			Buckets:        []float64{0.1, 0.25, 0.5, 1, 1.25, 2, 3, 5, 6, 10, 15, 20, 25},
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	PodStatusBatchBypass = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           PodStatusBatchBypassKey,
+			Help:           "Number of pod status updates that bypassed batching. The reason label is one of: force, pod_ready, containers_ready, terminal, unknown.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"reason"},
+	)
+
 	// ResourceManagerAllocationsTotal counts the total number of exclusive resource
 	// allocations performed by a manager. The `source` label distinguishes between
 	// allocations drawn from the node-level pool versus a pre-allocated pod-level pool.
@@ -1552,6 +1586,12 @@ func Register() {
 			legacyregistry.MustRegister(ImageVolumeRequestedTotal)
 			legacyregistry.MustRegister(ImageVolumeMountedSucceedTotal)
 			legacyregistry.MustRegister(ImageVolumeMountedErrorsTotal)
+		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.PodStatusBatchUpdates) {
+			legacyregistry.MustRegister(PodStatusBatchCoalesced)
+			legacyregistry.MustRegister(PodStatusBatchDelay)
+			legacyregistry.MustRegister(PodStatusBatchBypass)
 		}
 
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {

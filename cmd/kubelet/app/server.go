@@ -244,6 +244,11 @@ is checked every 20 seconds (also configurable with a flag).`,
 				}
 			}
 
+			// CLI flags may enable batching after the configuration has already been defaulted.
+			if utilfeature.DefaultFeatureGate.Enabled(features.PodStatusBatchUpdates) && kubeletConfig.PodStatusUpdateBatchWindow.Duration == 0 {
+				kubeletConfig.PodStatusUpdateBatchWindow.Duration = time.Second
+			}
+
 			// Config and flags parsed, now we can initialize logging.
 			logs.InitLogs()
 			// Retrieve the logger again to reflect the updated log settings
